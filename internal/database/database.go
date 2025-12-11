@@ -54,6 +54,8 @@ func (d *DB) migrate() error {
 		mod_log_channel TEXT,
 		welcome_channel TEXT,
 		welcome_message TEXT,
+		join_dm_title TEXT,
+		join_dm_message TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -264,21 +266,72 @@ func (d *DB) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	-- Moderation actions tracking
+	CREATE TABLE IF NOT EXISTS mod_actions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		moderator_id TEXT NOT NULL,
+		target_id TEXT NOT NULL,
+		action TEXT NOT NULL,
+		reason TEXT,
+		timestamp INTEGER NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- Mention responses (custom triggers)
+	CREATE TABLE IF NOT EXISTS mention_responses (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		trigger_text TEXT NOT NULL,
+		response TEXT NOT NULL,
+		image_url TEXT,
+		created_by TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(guild_id, trigger_text)
+	);
+
+	-- Spam filter configuration
+	CREATE TABLE IF NOT EXISTS spam_filter_config (
+		guild_id TEXT PRIMARY KEY,
+		enabled INTEGER DEFAULT 0,
+		max_mentions INTEGER DEFAULT 5,
+		max_links INTEGER DEFAULT 3,
+		max_emojis INTEGER DEFAULT 10,
+		action TEXT DEFAULT 'delete'
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_xp_guild ON user_xp(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_regex_filters_guild ON regex_filters(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_level_ranks_guild ON level_ranks(guild_id);
+	CREATE INDEX IF NOT EXISTS idx_mod_actions_guild ON mod_actions(guild_id);
+	CREATE INDEX IF NOT EXISTS idx_mod_actions_moderator ON mod_actions(guild_id, moderator_id);
+	CREATE INDEX IF NOT EXISTS idx_mod_actions_target ON mod_actions(guild_id, target_id);
 	`
 
 	_, err := d.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Run migrations for new columns
+	migrations := []string{
+		`ALTER TABLE guild_settings ADD COLUMN join_dm_title TEXT`,
+		`ALTER TABLE guild_settings ADD COLUMN join_dm_message TEXT`,
+	}
+
+	for _, migration := range migrations {
+		d.Exec(migration) // Ignore errors - column may already exist
+	}
+
+	return nil
 }
 
 // Guild Settings
 func (d *DB) GetGuildSettings(guildID string) (*GuildSettings, error) {
 	var gs GuildSettings
-	err := d.QueryRow(`SELECT guild_id, prefix, mod_log_channel, welcome_channel, welcome_message
+	err := d.QueryRow(`SELECT guild_id, prefix, mod_log_channel, welcome_channel, welcome_message, join_dm_title, join_dm_message
 		FROM guild_settings WHERE guild_id = ?`, guildID).Scan(
-		&gs.GuildID, &gs.Prefix, &gs.ModLogChannel, &gs.WelcomeChannel, &gs.WelcomeMessage)
+		&gs.GuildID, &gs.Prefix, &gs.ModLogChannel, &gs.WelcomeChannel, &gs.WelcomeMessage, &gs.JoinDMTitle, &gs.JoinDMMessage)
 	if err == sql.ErrNoRows {
 		return &GuildSettings{GuildID: guildID, Prefix: "/"}, nil
 	}
@@ -286,15 +339,17 @@ func (d *DB) GetGuildSettings(guildID string) (*GuildSettings, error) {
 }
 
 func (d *DB) SetGuildSettings(gs *GuildSettings) error {
-	_, err := d.Exec(`INSERT INTO guild_settings (guild_id, prefix, mod_log_channel, welcome_channel, welcome_message, updated_at)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+	_, err := d.Exec(`INSERT INTO guild_settings (guild_id, prefix, mod_log_channel, welcome_channel, welcome_message, join_dm_title, join_dm_message, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(guild_id) DO UPDATE SET
 		prefix = excluded.prefix,
 		mod_log_channel = excluded.mod_log_channel,
 		welcome_channel = excluded.welcome_channel,
 		welcome_message = excluded.welcome_message,
+		join_dm_title = excluded.join_dm_title,
+		join_dm_message = excluded.join_dm_message,
 		updated_at = CURRENT_TIMESTAMP`,
-		gs.GuildID, gs.Prefix, gs.ModLogChannel, gs.WelcomeChannel, gs.WelcomeMessage)
+		gs.GuildID, gs.Prefix, gs.ModLogChannel, gs.WelcomeChannel, gs.WelcomeMessage, gs.JoinDMTitle, gs.JoinDMMessage)
 	return err
 }
 
@@ -1075,4 +1130,176 @@ func sqrt(x float64) float64 {
 		z = (z + x/z) / 2
 	}
 	return z
+}
+
+// ============ Moderation Actions ============
+
+func (d *DB) AddModAction(guildID, moderatorID, targetID, action string, reason *string, timestamp int64) error {
+	_, err := d.Exec(`INSERT INTO mod_actions (guild_id, moderator_id, target_id, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)`,
+		guildID, moderatorID, targetID, action, reason, timestamp)
+	return err
+}
+
+func (d *DB) ModActionExists(guildID, targetID, action string, timestamp int64) (bool, error) {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM mod_actions WHERE guild_id = ? AND target_id = ? AND action = ? AND timestamp = ?`,
+		guildID, targetID, action, timestamp).Scan(&count)
+	return count > 0, err
+}
+
+func (d *DB) GetModActionsCount(guildID string) (int, error) {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM mod_actions WHERE guild_id = ?`, guildID).Scan(&count)
+	return count, err
+}
+
+func (d *DB) GetModStats(guildID string) (*ModStats, error) {
+	stats := &ModStats{
+		ActionCounts: make(map[string]int),
+		TopMods:      []ModeratorCount{},
+	}
+
+	// Get total count
+	d.QueryRow(`SELECT COUNT(*) FROM mod_actions WHERE guild_id = ?`, guildID).Scan(&stats.TotalActions)
+
+	// Get action counts
+	rows, err := d.Query(`SELECT action, COUNT(*) as count FROM mod_actions WHERE guild_id = ? GROUP BY action`, guildID)
+	if err != nil {
+		return stats, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var action string
+		var count int
+		if err := rows.Scan(&action, &count); err == nil {
+			stats.ActionCounts[action] = count
+		}
+	}
+
+	// Get top moderators
+	rows, err = d.Query(`SELECT moderator_id, COUNT(*) as count FROM mod_actions WHERE guild_id = ? GROUP BY moderator_id ORDER BY count DESC LIMIT 10`, guildID)
+	if err != nil {
+		return stats, err
+	}
+	defer rows.Close()
+
+	modMap := make(map[string]*ModeratorCount)
+	for rows.Next() {
+		var modID string
+		var count int
+		if err := rows.Scan(&modID, &count); err == nil {
+			modMap[modID] = &ModeratorCount{
+				ModeratorID: modID,
+				Count:       count,
+				Actions:     make(map[string]int),
+			}
+		}
+	}
+
+	// Get per-moderator action breakdown
+	for modID := range modMap {
+		rows, err := d.Query(`SELECT action, COUNT(*) as count FROM mod_actions WHERE guild_id = ? AND moderator_id = ? GROUP BY action`, guildID, modID)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var action string
+			var count int
+			if err := rows.Scan(&action, &count); err == nil {
+				modMap[modID].Actions[action] = count
+			}
+		}
+		rows.Close()
+		stats.TopMods = append(stats.TopMods, *modMap[modID])
+	}
+
+	return stats, nil
+}
+
+func (d *DB) GetModActionsForTarget(guildID, targetID string) ([]ModAction, error) {
+	rows, err := d.Query(`SELECT id, guild_id, moderator_id, target_id, action, reason, timestamp, created_at
+		FROM mod_actions WHERE guild_id = ? AND target_id = ? ORDER BY timestamp DESC`, guildID, targetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var actions []ModAction
+	for rows.Next() {
+		var ma ModAction
+		if err := rows.Scan(&ma.ID, &ma.GuildID, &ma.ModeratorID, &ma.TargetID, &ma.Action, &ma.Reason, &ma.Timestamp, &ma.CreatedAt); err != nil {
+			return nil, err
+		}
+		actions = append(actions, ma)
+	}
+	return actions, rows.Err()
+}
+
+// ============ Mention Responses ============
+
+func (d *DB) AddMentionResponse(guildID, trigger, response string, imageURL *string, createdBy string) error {
+	_, err := d.Exec(`INSERT INTO mention_responses (guild_id, trigger_text, response, image_url, created_by)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(guild_id, trigger_text) DO UPDATE SET response = excluded.response, image_url = excluded.image_url`,
+		guildID, trigger, response, imageURL, createdBy)
+	return err
+}
+
+func (d *DB) RemoveMentionResponse(guildID, trigger string) error {
+	_, err := d.Exec(`DELETE FROM mention_responses WHERE guild_id = ? AND trigger_text = ?`, guildID, trigger)
+	return err
+}
+
+func (d *DB) GetMentionResponses(guildID string) ([]MentionResponse, error) {
+	rows, err := d.Query(`SELECT id, guild_id, trigger_text, response, image_url, created_by, created_at
+		FROM mention_responses WHERE guild_id = ? ORDER BY trigger_text`, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var responses []MentionResponse
+	for rows.Next() {
+		var mr MentionResponse
+		if err := rows.Scan(&mr.ID, &mr.GuildID, &mr.TriggerText, &mr.Response, &mr.ImageURL, &mr.CreatedBy, &mr.CreatedAt); err != nil {
+			return nil, err
+		}
+		responses = append(responses, mr)
+	}
+	return responses, rows.Err()
+}
+
+func (d *DB) GetMentionResponse(guildID, trigger string) (*MentionResponse, error) {
+	var mr MentionResponse
+	err := d.QueryRow(`SELECT id, guild_id, trigger_text, response, image_url, created_by, created_at
+		FROM mention_responses WHERE guild_id = ? AND trigger_text = ?`, guildID, trigger).Scan(
+		&mr.ID, &mr.GuildID, &mr.TriggerText, &mr.Response, &mr.ImageURL, &mr.CreatedBy, &mr.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &mr, err
+}
+
+// ============ Spam Filter ============
+
+func (d *DB) GetSpamFilterConfig(guildID string) (*SpamFilterConfig, error) {
+	var sf SpamFilterConfig
+	err := d.QueryRow(`SELECT guild_id, enabled, max_mentions, max_links, max_emojis, action
+		FROM spam_filter_config WHERE guild_id = ?`, guildID).Scan(
+		&sf.GuildID, &sf.Enabled, &sf.MaxMentions, &sf.MaxLinks, &sf.MaxEmojis, &sf.Action)
+	if err == sql.ErrNoRows {
+		return &SpamFilterConfig{GuildID: guildID, Enabled: false, MaxMentions: 5, MaxLinks: 3, MaxEmojis: 10, Action: "delete"}, nil
+	}
+	return &sf, err
+}
+
+func (d *DB) SetSpamFilterConfig(sf *SpamFilterConfig) error {
+	_, err := d.Exec(`INSERT INTO spam_filter_config (guild_id, enabled, max_mentions, max_links, max_emojis, action)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET
+		enabled = excluded.enabled, max_mentions = excluded.max_mentions,
+		max_links = excluded.max_links, max_emojis = excluded.max_emojis, action = excluded.action`,
+		sf.GuildID, sf.Enabled, sf.MaxMentions, sf.MaxLinks, sf.MaxEmojis, sf.Action)
+	return err
 }

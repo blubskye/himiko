@@ -242,6 +242,18 @@ func formatUnixTime(t time.Time) string {
 	return strconv.FormatInt(t.Unix(), 10)
 }
 
+// snowflakeToTimestamp converts a Discord snowflake ID string to a Unix timestamp in milliseconds
+func snowflakeToTimestamp(id string) int64 {
+	snowflake, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return time.Now().UnixMilli()
+	}
+	// Discord epoch: January 1, 2015 (1420070400000 ms)
+	const discordEpoch = 1420070400000
+	timestamp := (snowflake >> 22) + discordEpoch
+	return timestamp
+}
+
 func containsWord(text, word string) bool {
 	text = strings.ToLower(text)
 	word = strings.ToLower(word)

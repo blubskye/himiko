@@ -24,6 +24,8 @@ type GuildSettings struct {
 	ModLogChannel  *string
 	WelcomeChannel *string
 	WelcomeMessage *string
+	JoinDMTitle    *string
+	JoinDMMessage  *string
 }
 
 type CustomCommand struct {
@@ -190,4 +192,50 @@ type BotBan struct {
 	Reason    string
 	BannedBy  string
 	CreatedAt time.Time
+}
+
+// Moderation Actions
+type ModAction struct {
+	ID          int64
+	GuildID     string
+	ModeratorID string
+	TargetID    string
+	Action      string // ban, unban, kick, timeout
+	Reason      *string
+	Timestamp   int64
+	CreatedAt   time.Time
+}
+
+// Mod Stats
+type ModStats struct {
+	TotalActions int
+	ActionCounts map[string]int
+	TopMods      []ModeratorCount
+}
+
+type ModeratorCount struct {
+	ModeratorID string
+	Count       int
+	Actions     map[string]int
+}
+
+// Mention Responses
+type MentionResponse struct {
+	ID          int64
+	GuildID     string
+	TriggerText string
+	Response    string
+	ImageURL    *string
+	CreatedBy   string
+	CreatedAt   time.Time
+}
+
+// Spam Filter Config
+type SpamFilterConfig struct {
+	GuildID     string
+	Enabled     bool
+	MaxMentions int
+	MaxLinks    int
+	MaxEmojis   int
+	Action      string // delete, warn, kick, ban
 }

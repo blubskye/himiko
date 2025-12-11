@@ -143,6 +143,28 @@ func (b *Bot) onGuildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd
 		msg = replacePlaceholders(msg, m.User, m.GuildID)
 		s.ChannelMessageSend(*settings.WelcomeChannel, msg)
 	}
+
+	// Send join DM if configured
+	if settings.JoinDMTitle != nil || settings.JoinDMMessage != nil {
+		channel, err := s.UserChannelCreate(m.User.ID)
+		if err != nil {
+			return
+		}
+
+		embed := &discordgo.MessageEmbed{
+			Color: 0xFF69B4,
+		}
+
+		if settings.JoinDMTitle != nil {
+			embed.Title = replacePlaceholders(*settings.JoinDMTitle, m.User, m.GuildID)
+		}
+
+		if settings.JoinDMMessage != nil {
+			embed.Description = replacePlaceholders(*settings.JoinDMMessage, m.User, m.GuildID)
+		}
+
+		s.ChannelMessageSendEmbed(channel.ID, embed)
+	}
 }
 
 func (b *Bot) checkAFKMentions(s *discordgo.Session, m *discordgo.MessageCreate) {

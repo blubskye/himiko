@@ -92,6 +92,36 @@ func (ch *CommandHandler) registerSettingsCommands() {
 		Category:    "Settings",
 		Handler:     ch.viewSettingsHandler,
 	})
+
+	// Set join DM message
+	ch.Register(&Command{
+		Name:        "setjoindm",
+		Description: "Configure DM sent to new members when they join",
+		Category:    "Settings",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "title",
+				Description: "Title of the DM embed",
+				Required:    false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "message",
+				Description: "Message content ({user}, {username}, {server} placeholders)",
+				Required:    false,
+			},
+		},
+		Handler: ch.setJoinDMHandler,
+	})
+
+	// Disable join DM
+	ch.Register(&Command{
+		Name:        "disablejoindm",
+		Description: "Disable DMs sent to new members",
+		Category:    "Settings",
+		Handler:     ch.disableJoinDMHandler,
+	})
 }
 
 func (ch *CommandHandler) setPrefixHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -214,6 +244,15 @@ func (ch *CommandHandler) viewSettingsHandler(s *discordgo.Session, i *discordgo
 		}
 	}
 
+	joinDMStatus := "Disabled"
+	joinDMTitle := "N/A"
+	if settings.JoinDMTitle != nil || settings.JoinDMMessage != nil {
+		joinDMStatus = "Enabled"
+		if settings.JoinDMTitle != nil {
+			joinDMTitle = truncate(*settings.JoinDMTitle, 50)
+		}
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title: "Server Settings",
 		Color: 0x5865F2,
@@ -222,8 +261,75 @@ func (ch *CommandHandler) viewSettingsHandler(s *discordgo.Session, i *discordgo
 			{Name: "Mod Log Channel", Value: modLog, Inline: true},
 			{Name: "Welcome Channel", Value: welcomeChannel, Inline: true},
 			{Name: "Welcome Message", Value: welcomeMessage, Inline: false},
+			{Name: "Join DM", Value: joinDMStatus, Inline: true},
+			{Name: "Join DM Title", Value: joinDMTitle, Inline: true},
 		},
 	}
 
+	respondEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) setJoinDMHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !isAdmin(s, i.GuildID, i.Member.User.ID) {
+		respondEphemeral(s, i, "You need administrator permission to change settings.")
+		return
+	}
+
+	title := getStringOption(i, "title")
+	message := getStringOption(i, "message")
+
+	if title == "" && message == "" {
+		respondEphemeral(s, i, "Please provide at least a title or message.")
+		return
+	}
+
+	settings, _ := ch.bot.DB.GetGuildSettings(i.GuildID)
+
+	if title != "" {
+		settings.JoinDMTitle = &title
+	}
+	if message != "" {
+		settings.JoinDMMessage = &message
+	}
+
+	err := ch.bot.DB.SetGuildSettings(settings)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to update join DM settings.")
+		return
+	}
+
+	previewTitle := "Welcome!"
+	previewMsg := ""
+	if settings.JoinDMTitle != nil {
+		previewTitle = *settings.JoinDMTitle
+	}
+	if settings.JoinDMMessage != nil {
+		previewMsg = replacePlaceholders(*settings.JoinDMMessage, i.Member.User, i.GuildID)
+	}
+
+	embed := successEmbed("Join DM Configured",
+		fmt.Sprintf("New members will receive a DM when they join.\n\n**Preview:**\n**%s**\n%s",
+			previewTitle, previewMsg))
+	respondEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) disableJoinDMHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !isAdmin(s, i.GuildID, i.Member.User.ID) {
+		respondEphemeral(s, i, "You need administrator permission to change settings.")
+		return
+	}
+
+	settings, _ := ch.bot.DB.GetGuildSettings(i.GuildID)
+	settings.JoinDMTitle = nil
+	settings.JoinDMMessage = nil
+
+	err := ch.bot.DB.SetGuildSettings(settings)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to update settings.")
+		return
+	}
+
+	embed := successEmbed("Join DM Disabled",
+		"New members will no longer receive a DM when joining this server.")
 	respondEmbed(s, i, embed)
 }
