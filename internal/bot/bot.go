@@ -18,6 +18,7 @@ package bot
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"github.com/blubskye/himiko/internal/config"
@@ -26,11 +27,12 @@ import (
 )
 
 type Bot struct {
-	Session  *discordgo.Session
-	Config   *config.Config
-	DB       *database.DB
-	Commands *CommandHandler
-	stopChan chan struct{}
+	Session      *discordgo.Session
+	Config       *config.Config
+	DB           *database.DB
+	Commands     *CommandHandler
+	MusicManager *MusicManager
+	stopChan     chan struct{}
 }
 
 func New(cfg *config.Config, db *database.DB) (*Bot, error) {
@@ -43,10 +45,11 @@ func New(cfg *config.Config, db *database.DB) (*Bot, error) {
 	session.Identify.Intents = discordgo.IntentsAll
 
 	b := &Bot{
-		Session:  session,
-		Config:   cfg,
-		DB:       db,
-		stopChan: make(chan struct{}),
+		Session:      session,
+		Config:       cfg,
+		DB:           db,
+		MusicManager: NewMusicManager(),
+		stopChan:     make(chan struct{}),
 	}
 
 	// Initialize command handler
@@ -109,6 +112,9 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 		return
 	}
 
+	// Track user activity and aliases
+	b.trackUserActivity(m)
+
 	// Check anti-spam
 	b.CheckSpam(s, m)
 
@@ -120,6 +126,24 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 
 	// Check keyword notifications
 	b.checkKeywordNotifications(s, m)
+
+	// Check mention responses
+	b.checkMentionResponses(s, m)
+}
+
+func (b *Bot) trackUserActivity(m *discordgo.MessageCreate) {
+	// Track username alias
+	b.DB.RecordAlias(m.Author.ID, m.Author.Username, "username")
+
+	// Track nickname alias if in guild
+	if m.GuildID != "" && m.Member != nil && m.Member.Nick != "" {
+		b.DB.RecordAlias(m.Author.ID, m.Member.Nick, "nickname")
+	}
+
+	// Update user activity
+	if m.GuildID != "" {
+		b.DB.UpdateUserActivity(m.GuildID, m.Author.ID, true)
+	}
 }
 
 func (b *Bot) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
@@ -134,6 +158,12 @@ func (b *Bot) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) 
 }
 
 func (b *Bot) onGuildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
+	// Track username alias on join
+	b.DB.RecordAlias(m.User.ID, m.User.Username, "username")
+
+	// Track initial activity (join, not message)
+	b.DB.UpdateUserActivity(m.GuildID, m.User.ID, false)
+
 	// Check anti-raid
 	b.CheckRaid(s, m)
 
@@ -310,5 +340,44 @@ func (b *Bot) processScheduledEvents() {
 			}
 		}
 		b.DB.DeleteScheduledEvent(event.ID)
+	}
+}
+
+func (b *Bot) checkMentionResponses(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Only respond if bot is mentioned
+	if m.GuildID == "" {
+		return
+	}
+
+	botMention := "<@" + s.State.User.ID + ">"
+	botMentionNick := "<@!" + s.State.User.ID + ">"
+
+	if !strings.Contains(m.Content, botMention) && !strings.Contains(m.Content, botMentionNick) {
+		return
+	}
+
+	// Get mention responses for this guild
+	responses, err := b.DB.GetMentionResponses(m.GuildID)
+	if err != nil || len(responses) == 0 {
+		return
+	}
+
+	// Check each response trigger
+	contentLower := strings.ToLower(m.Content)
+	for _, resp := range responses {
+		if strings.Contains(contentLower, resp.TriggerText) {
+			// Send response
+			embed := &discordgo.MessageEmbed{
+				Description: resp.Response,
+				Color:       0xFF69B4,
+			}
+
+			if resp.ImageURL != nil && *resp.ImageURL != "" {
+				embed.Image = &discordgo.MessageEmbedImage{URL: *resp.ImageURL}
+			}
+
+			s.ChannelMessageSendEmbedReply(m.ChannelID, embed, m.Reference())
+			return // Only respond once
+		}
 	}
 }

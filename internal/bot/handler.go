@@ -73,6 +73,7 @@ func NewCommandHandler(b *Bot) *CommandHandler {
 	ch.registerTicketCommands()
 	ch.registerAntiRaidCommands()
 	ch.registerAntiSpamCommands()
+	ch.registerMusicCommands()
 
 	return ch
 }

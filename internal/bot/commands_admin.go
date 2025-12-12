@@ -336,6 +336,114 @@ func (ch *CommandHandler) registerAdminCommands() {
 		},
 		Handler: ch.softbanHandler,
 	})
+
+	// Mass add role
+	ch.Register(&Command{
+		Name:        "massrole",
+		Description: "Add or remove a role from all members or members with a specific role",
+		Category:    "Administration",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "add",
+				Description: "Add a role to members",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionRole,
+						Name:        "role",
+						Description: "The role to add",
+						Required:    true,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionRole,
+						Name:        "filter",
+						Description: "Only add to members who have this role (optional)",
+						Required:    false,
+					},
+				},
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "remove",
+				Description: "Remove a role from members",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionRole,
+						Name:        "role",
+						Description: "The role to remove",
+						Required:    true,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionRole,
+						Name:        "filter",
+						Description: "Only remove from members who have this role (optional)",
+						Required:    false,
+					},
+				},
+			},
+		},
+		Handler: ch.massRoleHandler,
+	})
+
+	// Channel lockdown (more restrictive than lock)
+	ch.Register(&Command{
+		Name:        "chanlockdown",
+		Description: "Lockdown a channel (block messages AND reactions)",
+		Category:    "Administration",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "channel",
+				Description: "Channel to lockdown (defaults to current)",
+				Required:    false,
+			},
+		},
+		Handler: ch.chanLockdownHandler,
+	})
+
+	// Channel unlock (restore from lockdown)
+	ch.Register(&Command{
+		Name:        "chanunlock",
+		Description: "Remove lockdown from a channel (restore messages and reactions)",
+		Category:    "Administration",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "channel",
+				Description: "Channel to unlock (defaults to current)",
+				Required:    false,
+			},
+		},
+		Handler: ch.chanUnlockHandler,
+	})
+
+	// Sync permissions command
+	ch.Register(&Command{
+		Name:        "syncperms",
+		Description: "Sync permissions from one channel to other channels",
+		Category:    "Administration",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "source",
+				Description: "The channel to copy permissions from",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "target",
+				Description: "Target channel (or specify category for all channels in it)",
+				Required:    false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionBoolean,
+				Name:        "all_channels",
+				Description: "Apply to all text channels in the server",
+				Required:    false,
+			},
+		},
+		Handler: ch.syncPermsHandler,
+	})
 }
 
 func (ch *CommandHandler) kickHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -799,4 +907,267 @@ func (ch *CommandHandler) softbanHandler(s *discordgo.Session, i *discordgo.Inte
 
 func floatPtr(f float64) *float64 {
 	return &f
+}
+
+func (ch *CommandHandler) massRoleHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !hasPermission(s, i.GuildID, i.Member.User.ID, discordgo.PermissionManageRoles) {
+		respondEphemeral(s, i, "You don't have permission to manage roles.")
+		return
+	}
+
+	subCmd := i.ApplicationCommandData().Options[0].Name
+	opts := i.ApplicationCommandData().Options[0].Options
+
+	var roleID, filterRoleID string
+	for _, opt := range opts {
+		switch opt.Name {
+		case "role":
+			roleID = opt.RoleValue(s, i.GuildID).ID
+		case "filter":
+			filterRoleID = opt.RoleValue(s, i.GuildID).ID
+		}
+	}
+
+	// Defer response since this can take a while
+	respondDeferred(s, i)
+
+	// Get all guild members
+	members, err := s.GuildMembers(i.GuildID, "", 1000)
+	if err != nil {
+		editResponse(s, i, "Failed to get guild members: "+err.Error())
+		return
+	}
+
+	var affected int
+	var errors int
+
+	for _, member := range members {
+		// Skip bots
+		if member.User.Bot {
+			continue
+		}
+
+		// If filter role specified, check if member has it
+		if filterRoleID != "" {
+			hasFilter := false
+			for _, r := range member.Roles {
+				if r == filterRoleID {
+					hasFilter = true
+					break
+				}
+			}
+			if !hasFilter {
+				continue
+			}
+		}
+
+		switch subCmd {
+		case "add":
+			// Check if they already have the role
+			hasRole := false
+			for _, r := range member.Roles {
+				if r == roleID {
+					hasRole = true
+					break
+				}
+			}
+			if !hasRole {
+				err := s.GuildMemberRoleAdd(i.GuildID, member.User.ID, roleID)
+				if err != nil {
+					errors++
+				} else {
+					affected++
+				}
+			}
+
+		case "remove":
+			// Check if they have the role
+			hasRole := false
+			for _, r := range member.Roles {
+				if r == roleID {
+					hasRole = true
+					break
+				}
+			}
+			if hasRole {
+				err := s.GuildMemberRoleRemove(i.GuildID, member.User.ID, roleID)
+				if err != nil {
+					errors++
+				} else {
+					affected++
+				}
+			}
+		}
+	}
+
+	action := "added to"
+	if subCmd == "remove" {
+		action = "removed from"
+	}
+
+	msg := fmt.Sprintf("Role <@&%s> %s **%d** members.", roleID, action, affected)
+	if errors > 0 {
+		msg += fmt.Sprintf(" (%d errors)", errors)
+	}
+
+	embed := successEmbed("Mass Role Complete", msg)
+	editResponseEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) chanLockdownHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !hasPermission(s, i.GuildID, i.Member.User.ID, discordgo.PermissionManageChannels) {
+		respondEphemeral(s, i, "You don't have permission to manage channels.")
+		return
+	}
+
+	channel := getChannelOption(i, "channel")
+	channelID := i.ChannelID
+	if channel != nil {
+		channelID = channel.ID
+	}
+
+	// Deny send messages AND add reactions for @everyone
+	err := s.ChannelPermissionSet(channelID, i.GuildID, discordgo.PermissionOverwriteTypeRole,
+		0, discordgo.PermissionSendMessages|discordgo.PermissionAddReactions)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to lockdown channel: "+err.Error())
+		return
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "Channel Locked Down",
+		Description: fmt.Sprintf("Channel <#%s> has been locked down.\n\n**Blocked:** Send Messages, Add Reactions", channelID),
+		Color:       0xFF0000,
+	}
+	respondEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) chanUnlockHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !hasPermission(s, i.GuildID, i.Member.User.ID, discordgo.PermissionManageChannels) {
+		respondEphemeral(s, i, "You don't have permission to manage channels.")
+		return
+	}
+
+	channel := getChannelOption(i, "channel")
+	channelID := i.ChannelID
+	if channel != nil {
+		channelID = channel.ID
+	}
+
+	// Remove the permission override entirely
+	err := s.ChannelPermissionDelete(channelID, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to unlock channel: "+err.Error())
+		return
+	}
+
+	embed := successEmbed("Channel Unlocked",
+		fmt.Sprintf("Channel <#%s> lockdown has been lifted.\n\n**Restored:** Send Messages, Add Reactions", channelID))
+	respondEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) syncPermsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !hasPermission(s, i.GuildID, i.Member.User.ID, discordgo.PermissionManageChannels) {
+		respondEphemeral(s, i, "You don't have permission to manage channels.")
+		return
+	}
+
+	sourceChannel := getChannelOption(i, "source")
+	if sourceChannel == nil {
+		respondEphemeral(s, i, "Please specify a source channel.")
+		return
+	}
+
+	targetChannel := getChannelOption(i, "target")
+	allChannels := getBoolOption(i, "all_channels")
+
+	// Defer response since this may take a while
+	respondDeferred(s, i)
+
+	// Get the source channel with full details
+	source, err := s.Channel(sourceChannel.ID)
+	if err != nil {
+		editResponse(s, i, "Failed to get source channel: "+err.Error())
+		return
+	}
+
+	var targetChannels []*discordgo.Channel
+
+	if allChannels {
+		// Get all channels in the guild
+		channels, err := s.GuildChannels(i.GuildID)
+		if err != nil {
+			editResponse(s, i, "Failed to get guild channels: "+err.Error())
+			return
+		}
+
+		for _, ch := range channels {
+			// Only sync to text channels, skip the source
+			if (ch.Type == discordgo.ChannelTypeGuildText || ch.Type == discordgo.ChannelTypeGuildNews) && ch.ID != source.ID {
+				targetChannels = append(targetChannels, ch)
+			}
+		}
+	} else if targetChannel != nil {
+		// Check if target is a category
+		target, err := s.Channel(targetChannel.ID)
+		if err != nil {
+			editResponse(s, i, "Failed to get target channel: "+err.Error())
+			return
+		}
+
+		if target.Type == discordgo.ChannelTypeGuildCategory {
+			// Get all channels in this category
+			channels, err := s.GuildChannels(i.GuildID)
+			if err != nil {
+				editResponse(s, i, "Failed to get guild channels: "+err.Error())
+				return
+			}
+
+			for _, ch := range channels {
+				if ch.ParentID == target.ID && ch.ID != source.ID {
+					targetChannels = append(targetChannels, ch)
+				}
+			}
+		} else {
+			// Single channel
+			targetChannels = append(targetChannels, target)
+		}
+	} else {
+		editResponse(s, i, "Please specify a target channel, category, or use all_channels=true.")
+		return
+	}
+
+	if len(targetChannels) == 0 {
+		editResponse(s, i, "No target channels found to sync permissions to.")
+		return
+	}
+
+	// Sync permissions
+	var synced, errors int
+	for _, target := range targetChannels {
+		// Clear existing overwrites on target
+		for _, overwrite := range target.PermissionOverwrites {
+			err := s.ChannelPermissionDelete(target.ID, overwrite.ID)
+			if err != nil {
+				errors++
+			}
+		}
+
+		// Copy overwrites from source
+		for _, overwrite := range source.PermissionOverwrites {
+			err := s.ChannelPermissionSet(target.ID, overwrite.ID, overwrite.Type, overwrite.Allow, overwrite.Deny)
+			if err != nil {
+				errors++
+			}
+		}
+		synced++
+	}
+
+	msg := fmt.Sprintf("Synced permissions from <#%s> to **%d** channels.", source.ID, synced)
+	if errors > 0 {
+		msg += fmt.Sprintf(" (%d errors)", errors)
+	}
+
+	embed := successEmbed("Permissions Synced", msg)
+	editResponseEmbed(s, i, embed)
 }

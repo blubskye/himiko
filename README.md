@@ -151,6 +151,16 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - Message link generator
 - **Ban Export/Import** - Share ban lists between servers!
 
+### 🎵 Music System
+- **URL Playback:** Play from YouTube, SoundCloud, and more via yt-dlp
+- **Local Library:** Play files from configured music folders
+- **Queue Management:** Add, remove, move tracks in queue
+- **Playback Controls:** Play, pause, resume, skip, stop
+- **Volume Control:** Adjust playback volume (0-100)
+- **DJ/Mod Roles:** Permission system for music commands
+- **History:** Track recently played songs
+- **Search:** Search local music library
+
 ### 🎫 Ticket System
 - **Submit Tickets:** Users can report issues to staff
 - **Configurable Channel:** Set where tickets are forwarded
@@ -242,6 +252,8 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 
 - Go 1.21+
 - GCC (for SQLite compilation with go-sqlite3)
+- FFmpeg (for music playback)
+- yt-dlp (for YouTube/SoundCloud support)
 
 ---
 
@@ -275,6 +287,7 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | **DM** | setdmchannel, disabledm, dmstatus |
 | **BotBan** | botban, botunban, botbanlist |
 | **AI** | ask |
+| **Music** | play, skip, stop, pause, resume, queue, nowplaying, remove, clear, movetop, volume, join, leave, musicrole, folders, files, local, search, musicfolder, musichistory |
 | **Misc** | help, command, tag, notify, history, about, invite, source |
 
 ---

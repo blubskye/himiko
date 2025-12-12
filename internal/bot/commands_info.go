@@ -136,6 +136,70 @@ func (ch *CommandHandler) registerInfoCommands() {
 		Category:    "Info",
 		Handler:     ch.memberCountHandler,
 	})
+
+	// New users (from sweetiebot)
+	ch.Register(&Command{
+		Name:        "newusers",
+		Description: "List the newest users to join the server",
+		Category:    "Info",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:        "count",
+				Description: "Number of users to show (max 30)",
+				Required:    false,
+			},
+		},
+		Handler: ch.newUsersHandler,
+	})
+
+	// AKA - alias lookup (from sweetiebot)
+	ch.Register(&Command{
+		Name:        "aka",
+		Description: "List all known aliases for a user",
+		Category:    "Info",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "user",
+				Description: "User to look up aliases for",
+				Required:    true,
+			},
+		},
+		Handler: ch.akaHandler,
+	})
+
+	// Set timezone
+	ch.Register(&Command{
+		Name:        "settimezone",
+		Description: "Set your timezone for time displays",
+		Category:    "Info",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "timezone",
+				Description: "Your timezone (e.g. America/New_York, Europe/London, Asia/Tokyo)",
+				Required:    true,
+			},
+		},
+		Handler: ch.setTimezoneHandler,
+	})
+
+	// Time command - show user's time
+	ch.Register(&Command{
+		Name:        "time",
+		Description: "Show the current time for a user (if they have set their timezone)",
+		Category:    "Info",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "user",
+				Description: "User to show time for",
+				Required:    false,
+			},
+		},
+		Handler: ch.timeHandler,
+	})
 }
 
 func (ch *CommandHandler) userInfoHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -159,15 +223,44 @@ func (ch *CommandHandler) userInfoHandler(s *discordgo.Session, i *discordgo.Int
 	// Parse timestamps
 	createdAt, _ := discordgo.SnowflakeTimestamp(user.ID)
 
+	// Build username with bot tag
+	usernameDisplay := user.Username
+	if user.Bot {
+		usernameDisplay += " [BOT]"
+	}
+
 	embed := &discordgo.MessageEmbed{
-		Title:     user.Username,
+		Title:     usernameDisplay,
 		Thumbnail: &discordgo.MessageEmbedThumbnail{URL: avatarURL(fullUser)},
-		Color:     0x5865F2,
+		Color:     0xFF69B4,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: user.ID, Inline: true},
-			{Name: "Bot", Value: fmt.Sprintf("%t", user.Bot), Inline: true},
 			{Name: "Created", Value: fmt.Sprintf("<t:%d:F>\n(<t:%d:R>)", createdAt.Unix(), createdAt.Unix()), Inline: false},
 		},
+	}
+
+	// Add nickname if present
+	if member != nil && member.Nick != "" {
+		embed.Fields = append([]*discordgo.MessageEmbedField{
+			{Name: "Nickname", Value: member.Nick, Inline: true},
+		}, embed.Fields...)
+	}
+
+	// Get known aliases
+	aliases, _ := ch.bot.DB.GetUserAliases(user.ID, 10)
+	if len(aliases) > 0 {
+		var aliasNames []string
+		for _, a := range aliases {
+			aliasNames = append(aliasNames, a.Alias)
+		}
+		aliasStr := strings.Join(aliasNames, ", ")
+		if len(aliasStr) > 1024 {
+			aliasStr = aliasStr[:1020] + "..."
+		}
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:  fmt.Sprintf("Known Aliases [%d]", len(aliases)),
+			Value: aliasStr,
+		})
 	}
 
 	if member != nil {
@@ -190,11 +283,46 @@ func (ch *CommandHandler) userInfoHandler(s *discordgo.Session, i *discordgo.Int
 			&discordgo.MessageEmbedField{Name: "Joined Server", Value: fmt.Sprintf("<t:%d:F>\n(<t:%d:R>)", joinedAt.Unix(), joinedAt.Unix()), Inline: false},
 			&discordgo.MessageEmbedField{Name: fmt.Sprintf("Roles [%d]", len(member.Roles)), Value: rolesStr, Inline: false},
 		)
+	}
 
-		if member.Nick != "" {
-			embed.Fields = append([]*discordgo.MessageEmbedField{
-				{Name: "Nickname", Value: member.Nick, Inline: true},
-			}, embed.Fields...)
+	// Get user timezone
+	tz, _ := ch.bot.DB.GetUserTimezone(user.ID)
+	if tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err == nil {
+			localTime := time.Now().In(loc).Format("Mon, 02 Jan 2006 15:04 MST")
+			embed.Fields = append(embed.Fields,
+				&discordgo.MessageEmbedField{Name: "Timezone", Value: tz, Inline: true},
+				&discordgo.MessageEmbedField{Name: "Local Time", Value: localTime, Inline: true},
+			)
+		}
+	}
+
+	// Get user activity (last seen, first message)
+	if i.GuildID != "" {
+		activity, _ := ch.bot.DB.GetUserActivity(i.GuildID, user.ID)
+		if activity != nil {
+			if activity.LastSeen != nil {
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   "Last Seen",
+					Value:  fmt.Sprintf("<t:%d:R>", activity.LastSeen.Unix()),
+					Inline: true,
+				})
+			}
+			if activity.FirstMessage != nil {
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   "First Message",
+					Value:  fmt.Sprintf("<t:%d:F>", activity.FirstMessage.Unix()),
+					Inline: true,
+				})
+			}
+			if activity.MessageCount > 0 {
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   "Messages",
+					Value:  fmt.Sprintf("%d", activity.MessageCount),
+					Inline: true,
+				})
+			}
 		}
 	}
 
@@ -549,4 +677,138 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+func (ch *CommandHandler) newUsersHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	count := int64(5)
+	if opt := getIntOption(i, "count"); opt > 0 {
+		count = opt
+		if count > 30 {
+			count = 30
+		}
+	}
+
+	activities, err := ch.bot.DB.GetNewestMembers(i.GuildID, int(count))
+	if err != nil || len(activities) == 0 {
+		respondEphemeral(s, i, "No user activity data found. Users need to send messages first to be tracked.")
+		return
+	}
+
+	var lines []string
+	for _, a := range activities {
+		user, err := s.User(a.UserID)
+		username := a.UserID
+		if err == nil {
+			username = user.Username
+		}
+
+		joined := "Unknown"
+		if a.FirstSeen != nil {
+			joined = fmt.Sprintf("<t:%d:R>", a.FirstSeen.Unix())
+		}
+
+		lines = append(lines, fmt.Sprintf("**%s** - Joined: %s", username, joined))
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("Newest %d Members", len(activities)),
+		Description: strings.Join(lines, "\n"),
+		Color:       0xFF69B4,
+	}
+
+	respondEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) akaHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := getUserOption(i, "user")
+	if user == nil {
+		respondEphemeral(s, i, "Please specify a user.")
+		return
+	}
+
+	aliases, err := ch.bot.DB.GetUserAliases(user.ID, 20)
+	if err != nil || len(aliases) == 0 {
+		respondEphemeral(s, i, fmt.Sprintf("No known aliases for **%s**.", user.Username))
+		return
+	}
+
+	var usernameAliases, nicknameAliases []string
+	for _, a := range aliases {
+		if a.AliasType == "username" {
+			usernameAliases = append(usernameAliases, a.Alias)
+		} else {
+			nicknameAliases = append(nicknameAliases, a.Alias)
+		}
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title: fmt.Sprintf("Known Aliases for %s", user.Username),
+		Color: 0xFF69B4,
+	}
+
+	if len(usernameAliases) > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:  "Usernames",
+			Value: strings.Join(usernameAliases, ", "),
+		})
+	}
+
+	if len(nicknameAliases) > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:  "Nicknames",
+			Value: strings.Join(nicknameAliases, ", "),
+		})
+	}
+
+	respondEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) setTimezoneHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	tz := getStringOption(i, "timezone")
+	if tz == "" {
+		respondEphemeral(s, i, "Please provide a timezone.")
+		return
+	}
+
+	// Validate timezone
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		respondEphemeral(s, i, fmt.Sprintf("Invalid timezone: `%s`\n\nExamples: `America/New_York`, `Europe/London`, `Asia/Tokyo`, `UTC`", tz))
+		return
+	}
+
+	err = ch.bot.DB.SetUserTimezone(i.Member.User.ID, tz)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to save timezone.")
+		return
+	}
+
+	currentTime := time.Now().In(loc).Format("Mon, 02 Jan 2006 15:04 MST")
+	respond(s, i, fmt.Sprintf("Your timezone has been set to **%s**.\nCurrent time: **%s**", tz, currentTime))
+}
+
+func (ch *CommandHandler) timeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := getUserOption(i, "user")
+	if user == nil {
+		user = i.Member.User
+	}
+
+	tz, err := ch.bot.DB.GetUserTimezone(user.ID)
+	if err != nil || tz == "" {
+		if user.ID == i.Member.User.ID {
+			respondEphemeral(s, i, "You haven't set your timezone. Use `/settimezone` to set it.")
+		} else {
+			respondEphemeral(s, i, fmt.Sprintf("**%s** hasn't set their timezone.", user.Username))
+		}
+		return
+	}
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		respondEphemeral(s, i, "Invalid timezone stored.")
+		return
+	}
+
+	currentTime := time.Now().In(loc).Format("Monday, 02 Jan 2006 15:04:05 MST")
+	respond(s, i, fmt.Sprintf("**%s**'s current time (%s):\n**%s**", user.Username, tz, currentTime))
 }

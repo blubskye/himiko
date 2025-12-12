@@ -295,3 +295,58 @@ type ScheduledEvent struct {
 	TargetID  string
 	ExecuteAt int64
 }
+
+// User Alias - tracks username/nickname history
+type UserAlias struct {
+	ID        int64
+	UserID    string
+	Alias     string
+	AliasType string // username, nickname
+	FirstSeen time.Time
+	LastSeen  time.Time
+	UseCount  int
+}
+
+// User Activity - tracks user activity per guild
+type UserActivity struct {
+	GuildID      string
+	UserID       string
+	FirstSeen    *time.Time
+	FirstMessage *time.Time
+	LastSeen     *time.Time
+	MessageCount int
+}
+
+// Music Settings - per-guild music configuration
+type MusicSettings struct {
+	GuildID     string
+	DJRoleID    *string
+	ModRoleID   *string
+	Volume      int
+	MusicFolder *string
+}
+
+// Music Queue Item
+type MusicQueueItem struct {
+	ID        int64
+	GuildID   string
+	ChannelID string
+	UserID    string
+	Title     string
+	URL       string
+	Duration  int
+	Thumbnail *string
+	IsLocal   bool
+	Position  int
+	AddedAt   time.Time
+}
+
+// Music History
+type MusicHistory struct {
+	ID       int64
+	GuildID  string
+	UserID   string
+	Title    string
+	URL      string
+	PlayedAt time.Time
+}

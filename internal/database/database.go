@@ -358,6 +358,72 @@ func (d *DB) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	-- User aliases (username/nickname history)
+	CREATE TABLE IF NOT EXISTS user_aliases (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id TEXT NOT NULL,
+		alias TEXT NOT NULL,
+		alias_type TEXT NOT NULL,
+		first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+		use_count INTEGER DEFAULT 1,
+		UNIQUE(user_id, alias, alias_type)
+	);
+
+	-- User activity tracking (per guild)
+	CREATE TABLE IF NOT EXISTS user_activity (
+		guild_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		first_seen DATETIME,
+		first_message DATETIME,
+		last_seen DATETIME,
+		message_count INTEGER DEFAULT 0,
+		PRIMARY KEY (guild_id, user_id)
+	);
+
+	-- User timezone settings
+	CREATE TABLE IF NOT EXISTS user_timezones (
+		user_id TEXT PRIMARY KEY,
+		timezone TEXT NOT NULL,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- Music: Guild music settings
+	CREATE TABLE IF NOT EXISTS music_settings (
+		guild_id TEXT PRIMARY KEY,
+		dj_role_id TEXT,
+		mod_role_id TEXT,
+		volume INTEGER DEFAULT 50,
+		music_folder TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- Music: Queue
+	CREATE TABLE IF NOT EXISTS music_queue (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		title TEXT NOT NULL,
+		url TEXT NOT NULL,
+		duration INTEGER DEFAULT 0,
+		thumbnail TEXT,
+		is_local INTEGER DEFAULT 0,
+		position INTEGER NOT NULL,
+		added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- Music: Playback history
+	CREATE TABLE IF NOT EXISTS music_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		title TEXT NOT NULL,
+		url TEXT NOT NULL,
+		played_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_xp_guild ON user_xp(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_member_joins_guild ON member_joins(guild_id, joined_at);
 	CREATE INDEX IF NOT EXISTS idx_scheduled_events_time ON scheduled_events(execute_at);
@@ -366,6 +432,10 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_mod_actions_guild ON mod_actions(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_mod_actions_moderator ON mod_actions(guild_id, moderator_id);
 	CREATE INDEX IF NOT EXISTS idx_mod_actions_target ON mod_actions(guild_id, target_id);
+	CREATE INDEX IF NOT EXISTS idx_user_aliases_user ON user_aliases(user_id);
+	CREATE INDEX IF NOT EXISTS idx_user_activity_guild ON user_activity(guild_id);
+	CREATE INDEX IF NOT EXISTS idx_music_queue_guild ON music_queue(guild_id, position);
+	CREATE INDEX IF NOT EXISTS idx_music_history_guild ON music_history(guild_id);
 	`
 
 	_, err := d.Exec(schema)
@@ -1563,4 +1633,284 @@ func (d *DB) DeleteScheduledEventByTarget(guildID, eventType, targetID string) e
 	_, err := d.Exec(`DELETE FROM scheduled_events WHERE guild_id = ? AND event_type = ? AND target_id = ?`,
 		guildID, eventType, targetID)
 	return err
+}
+
+// ============ User Aliases ============
+
+func (d *DB) RecordAlias(userID, alias, aliasType string) error {
+	_, err := d.Exec(`INSERT INTO user_aliases (user_id, alias, alias_type, last_seen, use_count)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP, 1)
+		ON CONFLICT(user_id, alias, alias_type) DO UPDATE SET
+		last_seen = CURRENT_TIMESTAMP, use_count = use_count + 1`,
+		userID, alias, aliasType)
+	return err
+}
+
+func (d *DB) GetUserAliases(userID string, limit int) ([]UserAlias, error) {
+	rows, err := d.Query(`SELECT id, user_id, alias, alias_type, first_seen, last_seen, use_count
+		FROM user_aliases WHERE user_id = ? ORDER BY use_count DESC, last_seen DESC LIMIT ?`,
+		userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var aliases []UserAlias
+	for rows.Next() {
+		var a UserAlias
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Alias, &a.AliasType, &a.FirstSeen, &a.LastSeen, &a.UseCount); err != nil {
+			return nil, err
+		}
+		aliases = append(aliases, a)
+	}
+	return aliases, rows.Err()
+}
+
+func (d *DB) SearchUserByAlias(alias string) ([]string, error) {
+	rows, err := d.Query(`SELECT DISTINCT user_id FROM user_aliases WHERE alias LIKE ? LIMIT 10`,
+		"%"+alias+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+		userIDs = append(userIDs, userID)
+	}
+	return userIDs, rows.Err()
+}
+
+// ============ User Activity ============
+
+func (d *DB) UpdateUserActivity(guildID, userID string, isMessage bool) error {
+	now := time.Now()
+
+	if isMessage {
+		_, err := d.Exec(`INSERT INTO user_activity (guild_id, user_id, first_seen, first_message, last_seen, message_count)
+			VALUES (?, ?, ?, ?, ?, 1)
+			ON CONFLICT(guild_id, user_id) DO UPDATE SET
+			last_seen = ?,
+			message_count = message_count + 1,
+			first_message = COALESCE(first_message, ?)`,
+			guildID, userID, now, now, now, now, now)
+		return err
+	}
+
+	_, err := d.Exec(`INSERT INTO user_activity (guild_id, user_id, first_seen, last_seen, message_count)
+		VALUES (?, ?, ?, ?, 0)
+		ON CONFLICT(guild_id, user_id) DO UPDATE SET last_seen = ?`,
+		guildID, userID, now, now, now)
+	return err
+}
+
+func (d *DB) GetUserActivity(guildID, userID string) (*UserActivity, error) {
+	var ua UserActivity
+	err := d.QueryRow(`SELECT guild_id, user_id, first_seen, first_message, last_seen, message_count
+		FROM user_activity WHERE guild_id = ? AND user_id = ?`, guildID, userID).Scan(
+		&ua.GuildID, &ua.UserID, &ua.FirstSeen, &ua.FirstMessage, &ua.LastSeen, &ua.MessageCount)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &ua, err
+}
+
+func (d *DB) GetNewestMembers(guildID string, limit int) ([]UserActivity, error) {
+	rows, err := d.Query(`SELECT guild_id, user_id, first_seen, first_message, last_seen, message_count
+		FROM user_activity WHERE guild_id = ? ORDER BY first_seen DESC LIMIT ?`,
+		guildID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var activities []UserActivity
+	for rows.Next() {
+		var ua UserActivity
+		if err := rows.Scan(&ua.GuildID, &ua.UserID, &ua.FirstSeen, &ua.FirstMessage, &ua.LastSeen, &ua.MessageCount); err != nil {
+			return nil, err
+		}
+		activities = append(activities, ua)
+	}
+	return activities, rows.Err()
+}
+
+// ============ User Timezones ============
+
+func (d *DB) SetUserTimezone(userID, timezone string) error {
+	_, err := d.Exec(`INSERT INTO user_timezones (user_id, timezone, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(user_id) DO UPDATE SET timezone = excluded.timezone, updated_at = CURRENT_TIMESTAMP`,
+		userID, timezone)
+	return err
+}
+
+func (d *DB) GetUserTimezone(userID string) (string, error) {
+	var tz string
+	err := d.QueryRow(`SELECT timezone FROM user_timezones WHERE user_id = ?`, userID).Scan(&tz)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return tz, err
+}
+
+func (d *DB) DeleteUserTimezone(userID string) error {
+	_, err := d.Exec(`DELETE FROM user_timezones WHERE user_id = ?`, userID)
+	return err
+}
+
+// ============ Music Settings ============
+
+func (d *DB) GetMusicSettings(guildID string) (*MusicSettings, error) {
+	var ms MusicSettings
+	err := d.QueryRow(`SELECT guild_id, dj_role_id, mod_role_id, volume, music_folder
+		FROM music_settings WHERE guild_id = ?`, guildID).Scan(
+		&ms.GuildID, &ms.DJRoleID, &ms.ModRoleID, &ms.Volume, &ms.MusicFolder)
+	if err == sql.ErrNoRows {
+		return &MusicSettings{GuildID: guildID, Volume: 50}, nil
+	}
+	return &ms, err
+}
+
+func (d *DB) SetMusicSettings(ms *MusicSettings) error {
+	_, err := d.Exec(`INSERT INTO music_settings (guild_id, dj_role_id, mod_role_id, volume, music_folder, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(guild_id) DO UPDATE SET
+		dj_role_id = excluded.dj_role_id, mod_role_id = excluded.mod_role_id,
+		volume = excluded.volume, music_folder = excluded.music_folder,
+		updated_at = CURRENT_TIMESTAMP`,
+		ms.GuildID, ms.DJRoleID, ms.ModRoleID, ms.Volume, ms.MusicFolder)
+	return err
+}
+
+func (d *DB) UpdateMusicVolume(guildID string, volume int) error {
+	_, err := d.Exec(`INSERT INTO music_settings (guild_id, volume, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(guild_id) DO UPDATE SET volume = excluded.volume, updated_at = CURRENT_TIMESTAMP`,
+		guildID, volume)
+	return err
+}
+
+func (d *DB) UpdateMusicRoles(guildID string, djRoleID, modRoleID *string) error {
+	_, err := d.Exec(`INSERT INTO music_settings (guild_id, dj_role_id, mod_role_id, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(guild_id) DO UPDATE SET
+		dj_role_id = excluded.dj_role_id, mod_role_id = excluded.mod_role_id,
+		updated_at = CURRENT_TIMESTAMP`,
+		guildID, djRoleID, modRoleID)
+	return err
+}
+
+// ============ Music Queue ============
+
+func (d *DB) AddToMusicQueue(item *MusicQueueItem) error {
+	_, err := d.Exec(`INSERT INTO music_queue (guild_id, channel_id, user_id, title, url, duration, thumbnail, is_local, position)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+			COALESCE((SELECT MAX(position) + 1 FROM music_queue WHERE guild_id = ?), 0))`,
+		item.GuildID, item.ChannelID, item.UserID, item.Title, item.URL, item.Duration, item.Thumbnail, item.IsLocal, item.GuildID)
+	return err
+}
+
+func (d *DB) GetMusicQueue(guildID string) ([]MusicQueueItem, error) {
+	rows, err := d.Query(`SELECT id, guild_id, channel_id, user_id, title, url, duration, thumbnail, is_local, position, added_at
+		FROM music_queue WHERE guild_id = ? ORDER BY position ASC`, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []MusicQueueItem
+	for rows.Next() {
+		var item MusicQueueItem
+		if err := rows.Scan(&item.ID, &item.GuildID, &item.ChannelID, &item.UserID, &item.Title, &item.URL,
+			&item.Duration, &item.Thumbnail, &item.IsLocal, &item.Position, &item.AddedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (d *DB) RemoveFromMusicQueue(guildID string, position int) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`DELETE FROM music_queue WHERE guild_id = ? AND position = ?`, guildID, position)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(`UPDATE music_queue SET position = position - 1 WHERE guild_id = ? AND position > ?`, guildID, position)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (d *DB) ClearMusicQueue(guildID string) error {
+	_, err := d.Exec(`DELETE FROM music_queue WHERE guild_id = ?`, guildID)
+	return err
+}
+
+func (d *DB) MoveToTopMusicQueue(guildID string, position int) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Temporarily set position to -1
+	_, err = tx.Exec(`UPDATE music_queue SET position = -1 WHERE guild_id = ? AND position = ?`, guildID, position)
+	if err != nil {
+		return err
+	}
+
+	// Increment all positions that were less than the moved item
+	_, err = tx.Exec(`UPDATE music_queue SET position = position + 1 WHERE guild_id = ? AND position >= 0 AND position < ?`, guildID, position)
+	if err != nil {
+		return err
+	}
+
+	// Set the moved item to position 0
+	_, err = tx.Exec(`UPDATE music_queue SET position = 0 WHERE guild_id = ? AND position = -1`, guildID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// ============ Music History ============
+
+func (d *DB) AddToMusicHistory(guildID, userID, title, url string) error {
+	_, err := d.Exec(`INSERT INTO music_history (guild_id, user_id, title, url) VALUES (?, ?, ?, ?)`,
+		guildID, userID, title, url)
+	return err
+}
+
+func (d *DB) GetMusicHistory(guildID string, limit int) ([]MusicHistory, error) {
+	rows, err := d.Query(`SELECT id, guild_id, user_id, title, url, played_at
+		FROM music_history WHERE guild_id = ? ORDER BY played_at DESC LIMIT ?`, guildID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []MusicHistory
+	for rows.Next() {
+		var item MusicHistory
+		if err := rows.Scan(&item.ID, &item.GuildID, &item.UserID, &item.Title, &item.URL, &item.PlayedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
