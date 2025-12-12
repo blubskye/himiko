@@ -31,7 +31,7 @@ import (
 const (
 	GitHubRepo    = "blubskye/himiko"
 	GitHubAPIURL  = "https://api.github.com/repos/" + GitHubRepo + "/releases/latest"
-	CurrentVersion = "1.5.1"
+	CurrentVersion = "1.5.2"
 )
 
 // Release represents a GitHub release

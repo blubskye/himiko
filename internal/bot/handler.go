@@ -29,12 +29,66 @@ type CommandHandler struct {
 }
 
 type Command struct {
-	Name        string
-	Description string
-	Category    string
-	Options     []*discordgo.ApplicationCommandOption
-	Handler     func(s *discordgo.Session, i *discordgo.InteractionCreate)
-	Autocomplete func(s *discordgo.Session, i *discordgo.InteractionCreate)
+	Name          string
+	Description   string
+	Category      string
+	Options       []*discordgo.ApplicationCommandOption
+	Handler       func(s *discordgo.Session, i *discordgo.InteractionCreate)
+	Autocomplete  func(s *discordgo.Session, i *discordgo.InteractionCreate)
+	PrefixHandler func(ctx *PrefixContext) // Handler for prefix-based commands
+	SlashOnly     bool                     // If true, only register as slash command (default behavior for essential commands)
+	PrefixOnly    bool                     // If true, only available via prefix (not registered as slash command)
+}
+
+// PrefixContext holds context for prefix-based command execution
+type PrefixContext struct {
+	Session   *discordgo.Session
+	Message   *discordgo.MessageCreate
+	Command   *Command
+	Args      []string
+	Bot       *Bot
+	ChannelID string
+	GuildID   string
+	Author    *discordgo.User
+}
+
+// Reply sends a message reply
+func (ctx *PrefixContext) Reply(content string) {
+	ctx.Session.ChannelMessageSend(ctx.ChannelID, content)
+}
+
+// ReplyEmbed sends an embed reply
+func (ctx *PrefixContext) ReplyEmbed(embed *discordgo.MessageEmbed) {
+	ctx.Session.ChannelMessageSendEmbed(ctx.ChannelID, embed)
+}
+
+// GetArg returns the argument at the given index, or empty string if not found
+func (ctx *PrefixContext) GetArg(index int) string {
+	if index < len(ctx.Args) {
+		return ctx.Args[index]
+	}
+	return ""
+}
+
+// GetArgRest returns all arguments from the given index joined by space
+func (ctx *PrefixContext) GetArgRest(index int) string {
+	if index < len(ctx.Args) {
+		return strings.Join(ctx.Args[index:], " ")
+	}
+	return ""
+}
+
+// Categories that should be prefix-only to stay under Discord's 100 slash command limit
+var prefixOnlyCategories = map[string]bool{
+	"Fun":           true,
+	"Text":          true,
+	"Random":        true,
+	"Images":        true,
+	"Lookup":        true,
+	"Music":         true,
+	"Tools":         true,
+	"Utility":       true, // 13 commands
+	"Configuration": true, // 1 command
 }
 
 func NewCommandHandler(b *Bot) *CommandHandler {
@@ -85,8 +139,21 @@ func (ch *CommandHandler) Register(cmd *Command) {
 
 func (ch *CommandHandler) RegisterCommands() error {
 	var appCommands []*discordgo.ApplicationCommand
+	var prefixOnlyCount int
 
 	for _, cmd := range ch.commands {
+		// Skip prefix-only commands
+		if cmd.PrefixOnly {
+			prefixOnlyCount++
+			continue
+		}
+
+		// Skip commands in prefix-only categories (unless explicitly marked as slash-only)
+		if !cmd.SlashOnly && prefixOnlyCategories[cmd.Category] {
+			prefixOnlyCount++
+			continue
+		}
+
 		appCommands = append(appCommands, &discordgo.ApplicationCommand{
 			Name:        cmd.Name,
 			Description: cmd.Description,
@@ -100,7 +167,7 @@ func (ch *CommandHandler) RegisterCommands() error {
 		return err
 	}
 
-	log.Printf("Registered %d slash commands", len(appCommands))
+	log.Printf("Registered %d slash commands (%d prefix-only)", len(appCommands), prefixOnlyCount)
 	return nil
 }
 

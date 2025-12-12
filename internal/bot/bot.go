@@ -95,7 +95,7 @@ func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 	log.Printf("Connected to %d guilds", len(r.Guilds))
 
 	// Set status
-	s.UpdateGameStatus(0, "Use /help for commands")
+	s.UpdateGameStatus(0, "/help | Prefix: /")
 
 	// Check for updates in background
 	go b.CheckAndNotifyUpdate()
@@ -135,6 +135,78 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 
 	// Check mention responses
 	b.checkMentionResponses(s, m)
+
+	// Handle prefix commands
+	b.handlePrefixCommand(s, m)
+}
+
+func (b *Bot) handlePrefixCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Get prefix for this guild
+	prefix := b.Config.Prefix
+	if m.GuildID != "" {
+		settings, err := b.DB.GetGuildSettings(m.GuildID)
+		if err == nil && settings.Prefix != "" {
+			prefix = settings.Prefix
+		}
+	}
+
+	// Check if message starts with prefix
+	if !strings.HasPrefix(m.Content, prefix) {
+		return
+	}
+
+	// Parse command and args
+	content := strings.TrimPrefix(m.Content, prefix)
+	parts := strings.Fields(content)
+	if len(parts) == 0 {
+		return
+	}
+
+	cmdName := strings.ToLower(parts[0])
+	args := parts[1:]
+
+	// Find the command
+	cmd, exists := b.Commands.commands[cmdName]
+	if !exists {
+		return
+	}
+
+	// Check if this command is available via prefix
+	// Commands in prefix-only categories or explicitly marked PrefixOnly can be used
+	isPrefixAvailable := cmd.PrefixOnly || prefixOnlyCategories[cmd.Category]
+	if !isPrefixAvailable {
+		// Slash-only commands should use /command
+		return
+	}
+
+	// Create a fake interaction for the handler
+	// We'll use a wrapper that responds via message instead of interaction
+	b.executePrefixCommand(s, m, cmd, args)
+}
+
+func (b *Bot) executePrefixCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd *Command, args []string) {
+	// Log command usage
+	b.DB.LogCommand(m.GuildID, m.ChannelID, m.Author.ID, cmd.Name, strings.Join(args, " "))
+
+	// Create a prefix command context
+	ctx := &PrefixContext{
+		Session:   s,
+		Message:   m,
+		Command:   cmd,
+		Args:      args,
+		Bot:       b,
+		ChannelID: m.ChannelID,
+		GuildID:   m.GuildID,
+		Author:    m.Author,
+	}
+
+	// Execute the prefix handler if available
+	if cmd.PrefixHandler != nil {
+		cmd.PrefixHandler(ctx)
+	} else {
+		// No prefix handler available
+		s.ChannelMessageSend(m.ChannelID, "This command is only available as a slash command. Use `/"+cmd.Name+"`")
+	}
 }
 
 func (b *Bot) trackUserActivity(m *discordgo.MessageCreate) {
