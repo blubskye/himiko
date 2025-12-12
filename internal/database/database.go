@@ -308,7 +308,59 @@ func (d *DB) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	-- Anti-raid configuration
+	CREATE TABLE IF NOT EXISTS antiraid_config (
+		guild_id TEXT PRIMARY KEY,
+		enabled INTEGER DEFAULT 0,
+		raid_time INTEGER DEFAULT 300,
+		raid_size INTEGER DEFAULT 5,
+		auto_silence INTEGER DEFAULT 0,
+		lockdown_duration INTEGER DEFAULT 120,
+		silent_role_id TEXT,
+		alert_role_id TEXT,
+		log_channel_id TEXT,
+		action TEXT DEFAULT 'silence'
+	);
+
+	-- Member join tracking for raid detection
+	CREATE TABLE IF NOT EXISTS member_joins (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		joined_at INTEGER NOT NULL,
+		account_created_at INTEGER NOT NULL
+	);
+
+	-- Spam pressure tracking config
+	CREATE TABLE IF NOT EXISTS antispam_config (
+		guild_id TEXT PRIMARY KEY,
+		enabled INTEGER DEFAULT 0,
+		base_pressure REAL DEFAULT 10.0,
+		image_pressure REAL DEFAULT 8.33,
+		link_pressure REAL DEFAULT 8.33,
+		ping_pressure REAL DEFAULT 2.5,
+		length_pressure REAL DEFAULT 0.00625,
+		line_pressure REAL DEFAULT 0.71,
+		repeat_pressure REAL DEFAULT 10.0,
+		max_pressure REAL DEFAULT 60.0,
+		pressure_decay REAL DEFAULT 2.5,
+		action TEXT DEFAULT 'delete',
+		silent_role_id TEXT
+	);
+
+	-- Scheduled events (for timed unsilence, etc)
+	CREATE TABLE IF NOT EXISTS scheduled_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		event_type TEXT NOT NULL,
+		target_id TEXT NOT NULL,
+		execute_at INTEGER NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_xp_guild ON user_xp(guild_id);
+	CREATE INDEX IF NOT EXISTS idx_member_joins_guild ON member_joins(guild_id, joined_at);
+	CREATE INDEX IF NOT EXISTS idx_scheduled_events_time ON scheduled_events(execute_at);
 	CREATE INDEX IF NOT EXISTS idx_regex_filters_guild ON regex_filters(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_level_ranks_guild ON level_ranks(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_mod_actions_guild ON mod_actions(guild_id);
@@ -1335,5 +1387,180 @@ func (d *DB) SetTicketConfig(guildID, channelID string, enabled bool) error {
 
 func (d *DB) DeleteTicketConfig(guildID string) error {
 	_, err := d.Exec(`DELETE FROM ticket_config WHERE guild_id = ?`, guildID)
+	return err
+}
+
+// ============ Anti-Raid System ============
+
+func (d *DB) GetAntiRaidConfig(guildID string) (*AntiRaidConfig, error) {
+	var cfg AntiRaidConfig
+	var silentRole, alertRole, logChannel sql.NullString
+	err := d.QueryRow(`SELECT guild_id, enabled, raid_time, raid_size, auto_silence,
+		lockdown_duration, silent_role_id, alert_role_id, log_channel_id, action
+		FROM antiraid_config WHERE guild_id = ?`, guildID).Scan(
+		&cfg.GuildID, &cfg.Enabled, &cfg.RaidTime, &cfg.RaidSize, &cfg.AutoSilence,
+		&cfg.LockdownDuration, &silentRole, &alertRole, &logChannel, &cfg.Action)
+	if err == sql.ErrNoRows {
+		return &AntiRaidConfig{
+			GuildID:          guildID,
+			Enabled:          false,
+			RaidTime:         300,
+			RaidSize:         5,
+			AutoSilence:      0,
+			LockdownDuration: 120,
+			Action:           "silence",
+		}, nil
+	}
+	if silentRole.Valid {
+		cfg.SilentRoleID = silentRole.String
+	}
+	if alertRole.Valid {
+		cfg.AlertRoleID = alertRole.String
+	}
+	if logChannel.Valid {
+		cfg.LogChannelID = logChannel.String
+	}
+	return &cfg, err
+}
+
+func (d *DB) SetAntiRaidConfig(cfg *AntiRaidConfig) error {
+	_, err := d.Exec(`INSERT INTO antiraid_config (guild_id, enabled, raid_time, raid_size, auto_silence,
+		lockdown_duration, silent_role_id, alert_role_id, log_channel_id, action)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET
+		enabled = excluded.enabled, raid_time = excluded.raid_time, raid_size = excluded.raid_size,
+		auto_silence = excluded.auto_silence, lockdown_duration = excluded.lockdown_duration,
+		silent_role_id = excluded.silent_role_id, alert_role_id = excluded.alert_role_id,
+		log_channel_id = excluded.log_channel_id, action = excluded.action`,
+		cfg.GuildID, cfg.Enabled, cfg.RaidTime, cfg.RaidSize, cfg.AutoSilence,
+		cfg.LockdownDuration, cfg.SilentRoleID, cfg.AlertRoleID, cfg.LogChannelID, cfg.Action)
+	return err
+}
+
+func (d *DB) RecordMemberJoin(guildID, userID string, joinedAt, accountCreatedAt int64) error {
+	_, err := d.Exec(`INSERT INTO member_joins (guild_id, user_id, joined_at, account_created_at)
+		VALUES (?, ?, ?, ?)`, guildID, userID, joinedAt, accountCreatedAt)
+	return err
+}
+
+func (d *DB) CountRecentJoins(guildID string, sinceTimestamp int64) (int, error) {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM member_joins WHERE guild_id = ? AND joined_at >= ?`,
+		guildID, sinceTimestamp).Scan(&count)
+	return count, err
+}
+
+func (d *DB) GetRecentJoins(guildID string, sinceTimestamp int64) ([]MemberJoin, error) {
+	rows, err := d.Query(`SELECT id, guild_id, user_id, joined_at, account_created_at
+		FROM member_joins WHERE guild_id = ? AND joined_at >= ? ORDER BY joined_at DESC`,
+		guildID, sinceTimestamp)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var joins []MemberJoin
+	for rows.Next() {
+		var mj MemberJoin
+		if err := rows.Scan(&mj.ID, &mj.GuildID, &mj.UserID, &mj.JoinedAt, &mj.AccountCreatedAt); err != nil {
+			return nil, err
+		}
+		joins = append(joins, mj)
+	}
+	return joins, rows.Err()
+}
+
+func (d *DB) CleanOldJoins(guildID string, beforeTimestamp int64) error {
+	_, err := d.Exec(`DELETE FROM member_joins WHERE guild_id = ? AND joined_at < ?`,
+		guildID, beforeTimestamp)
+	return err
+}
+
+// ============ Anti-Spam System ============
+
+func (d *DB) GetAntiSpamConfig(guildID string) (*AntiSpamConfig, error) {
+	var cfg AntiSpamConfig
+	var silentRole sql.NullString
+	err := d.QueryRow(`SELECT guild_id, enabled, base_pressure, image_pressure, link_pressure,
+		ping_pressure, length_pressure, line_pressure, repeat_pressure, max_pressure,
+		pressure_decay, action, silent_role_id FROM antispam_config WHERE guild_id = ?`, guildID).Scan(
+		&cfg.GuildID, &cfg.Enabled, &cfg.BasePressure, &cfg.ImagePressure, &cfg.LinkPressure,
+		&cfg.PingPressure, &cfg.LengthPressure, &cfg.LinePressure, &cfg.RepeatPressure,
+		&cfg.MaxPressure, &cfg.PressureDecay, &cfg.Action, &silentRole)
+	if err == sql.ErrNoRows {
+		return &AntiSpamConfig{
+			GuildID:        guildID,
+			Enabled:        false,
+			BasePressure:   10.0,
+			ImagePressure:  8.33,
+			LinkPressure:   8.33,
+			PingPressure:   2.5,
+			LengthPressure: 0.00625,
+			LinePressure:   0.71,
+			RepeatPressure: 10.0,
+			MaxPressure:    60.0,
+			PressureDecay:  2.5,
+			Action:         "delete",
+		}, nil
+	}
+	if silentRole.Valid {
+		cfg.SilentRoleID = silentRole.String
+	}
+	return &cfg, err
+}
+
+func (d *DB) SetAntiSpamConfig(cfg *AntiSpamConfig) error {
+	_, err := d.Exec(`INSERT INTO antispam_config (guild_id, enabled, base_pressure, image_pressure,
+		link_pressure, ping_pressure, length_pressure, line_pressure, repeat_pressure,
+		max_pressure, pressure_decay, action, silent_role_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET
+		enabled = excluded.enabled, base_pressure = excluded.base_pressure,
+		image_pressure = excluded.image_pressure, link_pressure = excluded.link_pressure,
+		ping_pressure = excluded.ping_pressure, length_pressure = excluded.length_pressure,
+		line_pressure = excluded.line_pressure, repeat_pressure = excluded.repeat_pressure,
+		max_pressure = excluded.max_pressure, pressure_decay = excluded.pressure_decay,
+		action = excluded.action, silent_role_id = excluded.silent_role_id`,
+		cfg.GuildID, cfg.Enabled, cfg.BasePressure, cfg.ImagePressure, cfg.LinkPressure,
+		cfg.PingPressure, cfg.LengthPressure, cfg.LinePressure, cfg.RepeatPressure,
+		cfg.MaxPressure, cfg.PressureDecay, cfg.Action, cfg.SilentRoleID)
+	return err
+}
+
+// ============ Scheduled Events ============
+
+func (d *DB) AddScheduledEvent(guildID, eventType, targetID string, executeAt int64) error {
+	_, err := d.Exec(`INSERT INTO scheduled_events (guild_id, event_type, target_id, execute_at)
+		VALUES (?, ?, ?, ?)`, guildID, eventType, targetID, executeAt)
+	return err
+}
+
+func (d *DB) GetDueEvents(beforeTimestamp int64) ([]ScheduledEvent, error) {
+	rows, err := d.Query(`SELECT id, guild_id, event_type, target_id, execute_at
+		FROM scheduled_events WHERE execute_at <= ?`, beforeTimestamp)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []ScheduledEvent
+	for rows.Next() {
+		var ev ScheduledEvent
+		if err := rows.Scan(&ev.ID, &ev.GuildID, &ev.EventType, &ev.TargetID, &ev.ExecuteAt); err != nil {
+			return nil, err
+		}
+		events = append(events, ev)
+	}
+	return events, rows.Err()
+}
+
+func (d *DB) DeleteScheduledEvent(id int64) error {
+	_, err := d.Exec(`DELETE FROM scheduled_events WHERE id = ?`, id)
+	return err
+}
+
+func (d *DB) DeleteScheduledEventByTarget(guildID, eventType, targetID string) error {
+	_, err := d.Exec(`DELETE FROM scheduled_events WHERE guild_id = ? AND event_type = ? AND target_id = ?`,
+		guildID, eventType, targetID)
 	return err
 }

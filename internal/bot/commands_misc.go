@@ -338,9 +338,12 @@ func (ch *CommandHandler) helpHandler(s *discordgo.Session, i *discordgo.Interac
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "Himiko Bot Help",
-		Description: "Use `/help category:<name>` to see commands in a category\nUse `/help command:<name>` for detailed command help",
-		Color:       0x5865F2,
+		Description: "*\"Let me help you... I promise I won't bite~ Much.\"*\n\nUse `/help category:<name>` to see commands in a category\nUse `/help command:<name>` for detailed command help",
+		Color:       0xFF69B4,
 		Fields:      fields,
+		Thumbnail: &discordgo.MessageEmbedThumbnail{
+			URL: "https://raw.githubusercontent.com/blubskye/himiko/main/himiko.png",
+		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: fmt.Sprintf("%d total commands", len(ch.commands)),
 		},

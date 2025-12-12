@@ -71,6 +71,8 @@ func NewCommandHandler(b *Bot) *CommandHandler {
 	ch.registerSpamCommands()
 	ch.registerMentionCommands()
 	ch.registerTicketCommands()
+	ch.registerAntiRaidCommands()
+	ch.registerAntiSpamCommands()
 
 	return ch
 }

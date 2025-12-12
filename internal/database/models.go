@@ -246,3 +246,52 @@ type TicketConfig struct {
 	ChannelID string
 	Enabled   bool
 }
+
+// Anti-Raid Config
+type AntiRaidConfig struct {
+	GuildID          string
+	Enabled          bool
+	RaidTime         int    // Time window in seconds
+	RaidSize         int    // Number of joins to trigger raid
+	AutoSilence      int    // -2=log, -1=alert, 0=off, 1=raid, 2=all
+	LockdownDuration int    // Seconds to lockdown
+	SilentRoleID     string // Role to assign to silenced users
+	AlertRoleID      string // Role to ping on raid
+	LogChannelID     string // Channel for raid alerts
+	Action           string // silence, kick, ban
+}
+
+// Member Join record
+type MemberJoin struct {
+	ID               int64
+	GuildID          string
+	UserID           string
+	JoinedAt         int64
+	AccountCreatedAt int64
+}
+
+// Anti-Spam Config
+type AntiSpamConfig struct {
+	GuildID        string
+	Enabled        bool
+	BasePressure   float64
+	ImagePressure  float64
+	LinkPressure   float64
+	PingPressure   float64
+	LengthPressure float64
+	LinePressure   float64
+	RepeatPressure float64
+	MaxPressure    float64
+	PressureDecay  float64 // Seconds to decay BasePressure
+	Action         string  // delete, warn, silence, kick, ban
+	SilentRoleID   string
+}
+
+// Scheduled Event
+type ScheduledEvent struct {
+	ID        int64
+	GuildID   string
+	EventType string // unsilence, unmute, etc
+	TargetID  string
+	ExecuteAt int64
+}

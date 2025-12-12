@@ -109,6 +109,9 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 		return
 	}
 
+	// Check anti-spam
+	b.CheckSpam(s, m)
+
 	// Check for AFK mentions
 	b.checkAFKMentions(s, m)
 
@@ -131,6 +134,9 @@ func (b *Bot) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) 
 }
 
 func (b *Bot) onGuildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
+	// Check anti-raid
+	b.CheckRaid(s, m)
+
 	// Send welcome message if configured
 	settings, err := b.DB.GetGuildSettings(m.GuildID)
 	if err != nil {
@@ -239,6 +245,10 @@ func (b *Bot) runScheduledTasks() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	// Faster ticker for time-sensitive tasks like lockdown
+	fastTicker := time.NewTicker(10 * time.Second)
+	defer fastTicker.Stop()
+
 	cleanupTicker := time.NewTicker(1 * time.Hour)
 	defer cleanupTicker.Stop()
 
@@ -246,6 +256,9 @@ func (b *Bot) runScheduledTasks() {
 		select {
 		case <-b.stopChan:
 			return
+		case <-fastTicker.C:
+			b.CheckLockdownExpiry(b.Session)
+			b.processScheduledEvents()
 		case <-ticker.C:
 			b.processScheduledMessages()
 			b.processReminders()
@@ -277,5 +290,25 @@ func (b *Bot) processReminders() {
 	for _, r := range reminders {
 		b.Session.ChannelMessageSend(r.ChannelID, "<@"+r.UserID+"> Reminder: "+r.Message)
 		b.DB.MarkReminderCompleted(r.ID)
+	}
+}
+
+func (b *Bot) processScheduledEvents() {
+	now := time.Now().UnixMilli()
+	events, err := b.DB.GetDueEvents(now)
+	if err != nil {
+		return
+	}
+
+	for _, event := range events {
+		switch event.EventType {
+		case "unsilence":
+			// Get anti-raid config for silent role
+			cfg, err := b.DB.GetAntiRaidConfig(event.GuildID)
+			if err == nil && cfg.SilentRoleID != "" {
+				b.Session.GuildMemberRoleRemove(event.GuildID, event.TargetID, cfg.SilentRoleID)
+			}
+		}
+		b.DB.DeleteScheduledEvent(event.ID)
 	}
 }

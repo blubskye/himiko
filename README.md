@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://i.imgur.com/p2kmhbS.png" alt="Himiko" width="400"/>
+  <img src="himiko.png" alt="Himiko" width="400"/>
 </p>
 
 <h1 align="center">💉 Himiko Discord Bot 💉</h1>
@@ -47,6 +47,20 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - **Test Filters:** Test patterns before enabling
 - **Per-Channel Config:** Disable logging for specific channels
 - **Spam Filter:** Limit mentions, links, and emojis with configurable actions
+
+### 🚨 Anti-Raid Protection
+- **Raid Detection:** Automatic detection of mass joins
+- **Auto-Silence Modes:** Log, alert, raid-only, or all-joins silencing
+- **Server Lockdown:** Automatic verification level raise during raids
+- **Silence/Unsilence:** Manual and timed user silencing
+- **Ban Raid:** Bulk ban detected raid users
+- **Account Age Alerts:** Flag new accounts joining
+
+### 🔥 Advanced Anti-Spam (Pressure System)
+- **Pressure-Based Detection:** Accumulates spam pressure per user
+- **Configurable Penalties:** Images, links, pings, length, repeats
+- **Decay System:** Pressure naturally decreases over time
+- **Actions:** Delete, warn, silence, kick, or ban spammers
 
 ### 📊 Moderation Stats
 - **Track Mod Actions:** Import and track bans, kicks, timeouts
@@ -253,6 +267,8 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | **BanExport** | exportbans, importbans, scanbans |
 | **ModStats** | modstats, importmodhistory, modhistory |
 | **SpamFilter** | spamfilter (status/enable/disable/set) |
+| **Anti-Raid** | antiraid (status/enable/disable/set/setrole/setalert/autosilence), silence, unsilence, getraid, banraid, lockdown |
+| **Anti-Spam** | antispam (status/enable/disable/set/penalties/setrole) |
 | **Mentions** | mention (add/remove/list) |
 | **Ticket** | ticket, setticket, disableticket, ticketstatus |
 | **Settings** | setprefix, setmodlog, setwelcome, disablewelcome, setjoindm, disablejoindm, settings |
@@ -297,5 +313,5 @@ GNU Affero General Public License for more details.
 </p>
 
 <p align="center">
-  <img src="https://i.imgur.com/p2kmhbS.png" alt="Himiko" width="100"/>
+  <img src="himiko.png" alt="Himiko" width="100"/>
 </p>
