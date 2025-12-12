@@ -73,7 +73,8 @@ func (ch *CommandHandler) registerTextCommands() {
 				Required:    true,
 			},
 		},
-		Handler: ch.reverseHandler,
+		Handler:       ch.reverseHandler,
+		PrefixHandler: ch.reversePrefixHandler,
 	})
 
 	// Upside down
@@ -121,7 +122,8 @@ func (ch *CommandHandler) registerTextCommands() {
 				Required:    true,
 			},
 		},
-		Handler: ch.vaporwaveHandler,
+		Handler:       ch.vaporwaveHandler,
+		PrefixHandler: ch.vaporwavePrefixHandler,
 	})
 
 	// OwO
@@ -137,7 +139,8 @@ func (ch *CommandHandler) registerTextCommands() {
 				Required:    true,
 			},
 		},
-		Handler: ch.owoHandler,
+		Handler:       ch.owoHandler,
+		PrefixHandler: ch.owoPrefixHandler,
 	})
 
 	// Smart/Mock text
@@ -153,7 +156,8 @@ func (ch *CommandHandler) registerTextCommands() {
 				Required:    true,
 			},
 		},
-		Handler: ch.mockHandler,
+		Handler:       ch.mockHandler,
+		PrefixHandler: ch.mockPrefixHandler,
 	})
 
 	// 1337 speak
@@ -169,7 +173,8 @@ func (ch *CommandHandler) registerTextCommands() {
 				Required:    true,
 			},
 		},
-		Handler: ch.leetHandler,
+		Handler:       ch.leetHandler,
+		PrefixHandler: ch.leetPrefixHandler,
 	})
 
 	// Regional indicators (emoji letters)
@@ -217,7 +222,8 @@ func (ch *CommandHandler) registerTextCommands() {
 				Required:    true,
 			},
 		},
-		Handler: ch.spaceHandler,
+		Handler:       ch.spaceHandler,
+		PrefixHandler: ch.spacePrefixHandler,
 	})
 
 	// Italic/fancy text
@@ -311,7 +317,8 @@ func (ch *CommandHandler) registerTextCommands() {
 				Required:    false,
 			},
 		},
-		Handler: ch.codeblockHandler,
+		Handler:       ch.codeblockHandler,
+		PrefixHandler: ch.codeblockPrefixHandler,
 	})
 
 	// Hyperlink
@@ -768,4 +775,143 @@ func rot13(text string) string {
 		}
 	}
 	return result.String()
+}
+
+// Prefix handlers for text commands
+
+func (ch *CommandHandler) codeblockPrefixHandler(ctx *PrefixContext) {
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "codeblock <text>` or `" + ctx.Prefix + "codeblock <lang> <text>`")
+		return
+	}
+
+	var lang, text string
+	if len(ctx.Args) >= 2 {
+		// Check if first arg looks like a language
+		possibleLang := ctx.Args[0]
+		if len(possibleLang) <= 10 && !strings.Contains(possibleLang, " ") {
+			lang = possibleLang
+			text = ctx.GetArgRest(1)
+		} else {
+			text = ctx.GetArgRest(0)
+		}
+	} else {
+		text = ctx.GetArgRest(0)
+	}
+
+	ctx.Reply(fmt.Sprintf("```%s\n%s\n```", lang, text))
+}
+
+func (ch *CommandHandler) reversePrefixHandler(ctx *PrefixContext) {
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "reverse <text>`")
+		return
+	}
+	text := ctx.GetArgRest(0)
+	runes := []rune(text)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	ctx.Reply(string(runes))
+}
+
+func (ch *CommandHandler) mockPrefixHandler(ctx *PrefixContext) {
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "mock <text>`")
+		return
+	}
+	text := ctx.GetArgRest(0)
+	var result strings.Builder
+	upper := false
+	for _, char := range text {
+		if unicode.IsLetter(char) {
+			if upper {
+				result.WriteRune(unicode.ToUpper(char))
+			} else {
+				result.WriteRune(unicode.ToLower(char))
+			}
+			upper = !upper
+		} else {
+			result.WriteRune(char)
+		}
+	}
+	ctx.Reply(result.String())
+}
+
+func (ch *CommandHandler) owoPrefixHandler(ctx *PrefixContext) {
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "owo <text>`")
+		return
+	}
+	text := ctx.GetArgRest(0)
+	replacer := strings.NewReplacer(
+		"r", "w", "R", "W",
+		"l", "w", "L", "W",
+		"ove", "uv",
+		"OVE", "UV",
+	)
+	result := replacer.Replace(text)
+	faces := []string{" OwO", " UwU", " >w<", " ^w^", " :3", " nyaa~"}
+	result += faces[rand.Intn(len(faces))]
+	ctx.Reply(result)
+}
+
+func (ch *CommandHandler) vaporwavePrefixHandler(ctx *PrefixContext) {
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "vaporwave <text>`")
+		return
+	}
+	text := ctx.GetArgRest(0)
+	var result strings.Builder
+	for _, char := range text {
+		if char >= '!' && char <= '~' {
+			result.WriteRune(char + 0xFEE0)
+		} else if char == ' ' {
+			result.WriteString("  ")
+		} else {
+			result.WriteRune(char)
+		}
+	}
+	ctx.Reply(result.String())
+}
+
+func (ch *CommandHandler) leetPrefixHandler(ctx *PrefixContext) {
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "leet <text>`")
+		return
+	}
+	text := ctx.GetArgRest(0)
+	leetMap := map[rune]string{
+		'a': "4", 'A': "4", 'b': "8", 'B': "8",
+		'e': "3", 'E': "3", 'g': "9", 'G': "9",
+		'i': "1", 'I': "1", 'l': "1", 'L': "1",
+		'o': "0", 'O': "0", 's': "5", 'S': "5",
+		't': "7", 'T': "7",
+	}
+	var result strings.Builder
+	for _, char := range text {
+		if leet, ok := leetMap[char]; ok {
+			result.WriteString(leet)
+		} else {
+			result.WriteRune(char)
+		}
+	}
+	ctx.Reply(result.String())
+}
+
+func (ch *CommandHandler) spacePrefixHandler(ctx *PrefixContext) {
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "space <text>`")
+		return
+	}
+	text := ctx.GetArgRest(0)
+	var result strings.Builder
+	runes := []rune(text)
+	for i, char := range runes {
+		result.WriteRune(char)
+		if i < len(runes)-1 {
+			result.WriteString(" ")
+		}
+	}
+	ctx.Reply(result.String())
 }

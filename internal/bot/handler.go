@@ -50,6 +50,7 @@ type PrefixContext struct {
 	ChannelID string
 	GuildID   string
 	Author    *discordgo.User
+	Prefix    string
 }
 
 // Reply sends a message reply

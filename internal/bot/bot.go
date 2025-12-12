@@ -181,10 +181,10 @@ func (b *Bot) handlePrefixCommand(s *discordgo.Session, m *discordgo.MessageCrea
 
 	// Create a fake interaction for the handler
 	// We'll use a wrapper that responds via message instead of interaction
-	b.executePrefixCommand(s, m, cmd, args)
+	b.executePrefixCommand(s, m, cmd, args, prefix)
 }
 
-func (b *Bot) executePrefixCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd *Command, args []string) {
+func (b *Bot) executePrefixCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd *Command, args []string, prefix string) {
 	// Log command usage
 	b.DB.LogCommand(m.GuildID, m.ChannelID, m.Author.ID, cmd.Name, strings.Join(args, " "))
 
@@ -198,14 +198,15 @@ func (b *Bot) executePrefixCommand(s *discordgo.Session, m *discordgo.MessageCre
 		ChannelID: m.ChannelID,
 		GuildID:   m.GuildID,
 		Author:    m.Author,
+		Prefix:    prefix,
 	}
 
 	// Execute the prefix handler if available
 	if cmd.PrefixHandler != nil {
 		cmd.PrefixHandler(ctx)
-	} else {
-		// No prefix handler available
-		s.ChannelMessageSend(m.ChannelID, "This command is only available as a slash command. Use `/"+cmd.Name+"`")
+	} else if cmd.Handler != nil {
+		// No prefix handler - show usage help
+		s.ChannelMessageSend(m.ChannelID, "Usage: `"+prefix+cmd.Name+" <args>`\nThis command is prefix-only. Use `/help command:"+cmd.Name+"` for details.")
 	}
 }
 
