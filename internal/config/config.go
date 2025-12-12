@@ -45,15 +45,16 @@ type Config struct {
 
 	// Feature toggles
 	Features struct {
-		DMLogging            bool   `json:"dm_logging"`
-		CommandHistory       bool   `json:"command_history"`
-		DeleteTimer          int    `json:"delete_timer"` // seconds, 0 = disabled
-		WebhookNotify        bool   `json:"webhook_notify"`
-		WebhookURL           string `json:"webhook_url"`
-		AutoUpdate           bool   `json:"auto_update"`            // Check for updates on startup
-		AutoUpdateApply      bool   `json:"auto_update_apply"`      // Automatically apply updates (requires restart)
-		UpdateCheckHours     int    `json:"update_check_hours"`     // Hours between periodic update checks (0 = disabled)
-		UpdateNotifyChannel  string `json:"update_notify_channel"`  // Channel ID to post update notifications
+		DMLogging           bool   `json:"dm_logging"`
+		CommandHistory      bool   `json:"command_history"`
+		DeleteTimer         int    `json:"delete_timer"` // seconds, 0 = disabled
+		WebhookNotify       bool   `json:"webhook_notify"`
+		WebhookURL          string `json:"webhook_url"`
+		AutoUpdate          bool   `json:"auto_update"`           // Check for updates on startup
+		AutoUpdateApply     bool   `json:"auto_update_apply"`     // Automatically apply updates (requires restart)
+		UpdateCheckHours    int    `json:"update_check_hours"`    // Hours between periodic update checks (0 = disabled)
+		UpdateNotifyChannel string `json:"update_notify_channel"` // Channel ID to post update notifications
+		DebugMode           bool   `json:"debug_mode"`            // Enable verbose logging and stack traces
 	} `json:"features"`
 }
 
@@ -130,6 +131,13 @@ func migrateConfig(cfg *Config, originalData []byte, path string) bool {
 	// Check for owner_ids field (new in 1.5.3)
 	if _, exists := rawMap["owner_ids"]; !exists {
 		needsMigration = true
+	}
+
+	// Check for debug_mode in features (new in 1.5.5)
+	if features, ok := rawMap["features"].(map[string]interface{}); ok {
+		if _, exists := features["debug_mode"]; !exists {
+			needsMigration = true
+		}
 	}
 
 	if needsMigration {

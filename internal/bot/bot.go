@@ -32,6 +32,7 @@ type Bot struct {
 	DB           *database.DB
 	Commands     *CommandHandler
 	MusicManager *MusicManager
+	Debug        *DebugLogger
 	stopChan     chan struct{}
 }
 
@@ -49,7 +50,12 @@ func New(cfg *config.Config, db *database.DB) (*Bot, error) {
 		Config:       cfg,
 		DB:           db,
 		MusicManager: NewMusicManager(cfg.APIs.YouTubeAPIKey, cfg.APIs.SoundCloudAuthToken),
+		Debug:        NewDebugLogger(cfg.Features.DebugMode),
 		stopChan:     make(chan struct{}),
+	}
+
+	if cfg.Features.DebugMode {
+		log.Println("[DEBUG] Debug mode enabled - verbose logging and stack traces active")
 	}
 
 	// Initialize command handler

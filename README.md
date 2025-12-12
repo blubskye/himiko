@@ -192,6 +192,12 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - **Config Preservation:** Updates keep your config.json intact
 - **Configurable:** Enable/disable auto-update, auto-apply, check interval, and notification channel
 
+### 🐛 Debug Mode
+- **Full Stack Traces:** Enable verbose logging with complete stack traces
+- **Error Details:** Get detailed error information for troubleshooting
+- **Memory Stats:** View memory and goroutine statistics
+- **Caller Info:** Track exactly where errors originate
+
 ### 🚫 Bot Management (Owner Only)
 - Bot-level bans for users/servers
 - DM forwarding to designated channels
