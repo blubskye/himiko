@@ -10,7 +10,9 @@
     "spotify_client_secret": "",
     "openai_api_key": "",
     "openai_base_url": "https://api.openai.com/v1",
-    "openai_model": "gpt-3.5-turbo"
+    "openai_model": "gpt-3.5-turbo",
+    "youtube_api_key": "",
+    "soundcloud_auth_token": ""
   },
   "features": {
     "dm_logging": false,

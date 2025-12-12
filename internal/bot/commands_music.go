@@ -330,7 +330,7 @@ func (ch *CommandHandler) playHandler(s *discordgo.Session, i *discordgo.Interac
 	}
 
 	// Extract video info
-	info, err := ExtractInfo(query)
+	info, err := ExtractInfo(query, ch.bot.Config.APIs.YouTubeAPIKey, ch.bot.Config.APIs.SoundCloudAuthToken)
 	if err != nil {
 		editResponse(s, i, "Failed to get track info: "+err.Error())
 		return

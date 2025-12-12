@@ -29,13 +29,15 @@ type Config struct {
 
 	// API Keys for various services
 	APIs struct {
-		WeatherAPIKey string `json:"weather_api_key"`
-		GoogleAPIKey  string `json:"google_api_key"`
-		SpotifyID     string `json:"spotify_client_id"`
-		SpotifySecret string `json:"spotify_client_secret"`
-		OpenAIKey     string `json:"openai_api_key"`
-		OpenAIBaseURL string `json:"openai_base_url"`
-		OpenAIModel   string `json:"openai_model"`
+		WeatherAPIKey      string `json:"weather_api_key"`
+		GoogleAPIKey       string `json:"google_api_key"`
+		SpotifyID          string `json:"spotify_client_id"`
+		SpotifySecret      string `json:"spotify_client_secret"`
+		OpenAIKey          string `json:"openai_api_key"`
+		OpenAIBaseURL      string `json:"openai_base_url"`
+		OpenAIModel        string `json:"openai_model"`
+		YouTubeAPIKey      string `json:"youtube_api_key"`
+		SoundCloudAuthToken string `json:"soundcloud_auth_token"`
 	} `json:"apis"`
 
 	// Feature toggles

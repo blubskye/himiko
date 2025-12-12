@@ -48,7 +48,7 @@ func New(cfg *config.Config, db *database.DB) (*Bot, error) {
 		Session:      session,
 		Config:       cfg,
 		DB:           db,
-		MusicManager: NewMusicManager(),
+		MusicManager: NewMusicManager(cfg.APIs.YouTubeAPIKey, cfg.APIs.SoundCloudAuthToken),
 		stopChan:     make(chan struct{}),
 	}
 

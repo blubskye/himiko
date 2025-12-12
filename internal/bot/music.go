@@ -43,29 +43,35 @@ type Track struct {
 
 // MusicPlayer handles audio playback for a guild
 type MusicPlayer struct {
-	guildID    string
-	voiceConn  *discordgo.VoiceConnection
-	encoding   *dca.EncodeSession
-	streaming  *dca.StreamingSession
-	queue      []*Track
-	nowPlaying *Track
-	volume     int
-	mu         sync.RWMutex
-	stopChan   chan bool
-	isPlaying  bool
-	isPaused   bool
+	guildID             string
+	voiceConn           *discordgo.VoiceConnection
+	encoding            *dca.EncodeSession
+	streaming           *dca.StreamingSession
+	queue               []*Track
+	nowPlaying          *Track
+	volume              int
+	mu                  sync.RWMutex
+	stopChan            chan bool
+	isPlaying           bool
+	isPaused            bool
+	youtubeAPIKey       string
+	soundcloudAuthToken string
 }
 
 // MusicManager manages music players across guilds
 type MusicManager struct {
-	players map[string]*MusicPlayer
-	mu      sync.RWMutex
+	players             map[string]*MusicPlayer
+	mu                  sync.RWMutex
+	youtubeAPIKey       string
+	soundcloudAuthToken string
 }
 
 // NewMusicManager creates a new music manager
-func NewMusicManager() *MusicManager {
+func NewMusicManager(youtubeAPIKey, soundcloudAuthToken string) *MusicManager {
 	return &MusicManager{
-		players: make(map[string]*MusicPlayer),
+		players:             make(map[string]*MusicPlayer),
+		youtubeAPIKey:       youtubeAPIKey,
+		soundcloudAuthToken: soundcloudAuthToken,
 	}
 }
 
@@ -79,12 +85,14 @@ func (m *MusicManager) GetPlayer(guildID string) *MusicPlayer {
 	}
 
 	player := &MusicPlayer{
-		guildID:   guildID,
-		queue:     make([]*Track, 0),
-		volume:    50,
-		stopChan:  make(chan bool, 1),
-		isPlaying: false,
-		isPaused:  false,
+		guildID:             guildID,
+		queue:               make([]*Track, 0),
+		volume:              50,
+		stopChan:            make(chan bool, 1),
+		isPlaying:           false,
+		isPaused:            false,
+		youtubeAPIKey:       m.youtubeAPIKey,
+		soundcloudAuthToken: m.soundcloudAuthToken,
 	}
 	m.players[guildID] = player
 	return player
@@ -111,7 +119,7 @@ type VideoInfo struct {
 }
 
 // ExtractInfo extracts video info using yt-dlp
-func ExtractInfo(url string) (*VideoInfo, error) {
+func ExtractInfo(url, youtubeAPIKey, soundcloudAuthToken string) (*VideoInfo, error) {
 	// Check if it's a local file
 	if isLocalFile(url) {
 		return extractLocalFileInfo(url)
@@ -124,12 +132,12 @@ func ExtractInfo(url string) (*VideoInfo, error) {
 	}
 
 	// Add API keys if available
-	if youtubeKey := os.Getenv("YOUTUBE_API_KEY"); youtubeKey != "" {
+	if youtubeAPIKey != "" {
 		args = append(args, "--username", "oauth2", "--password", "")
 	}
 
-	if soundcloudAuth := os.Getenv("SOUNDCLOUD_AUTH_TOKEN"); soundcloudAuth != "" {
-		args = append(args, "--add-header", "Authorization:OAuth "+soundcloudAuth)
+	if soundcloudAuthToken != "" {
+		args = append(args, "--add-header", "Authorization:OAuth "+soundcloudAuthToken)
 	}
 
 	args = append(args, url)
@@ -367,12 +375,12 @@ func (p *MusicPlayer) playTrack(track *Track) error {
 		"--no-playlist",
 	}
 
-	if youtubeKey := os.Getenv("YOUTUBE_API_KEY"); youtubeKey != "" {
+	if p.youtubeAPIKey != "" {
 		args = append(args, "--username", "oauth2", "--password", "")
 	}
 
-	if soundcloudAuth := os.Getenv("SOUNDCLOUD_AUTH_TOKEN"); soundcloudAuth != "" {
-		args = append(args, "--add-header", "Authorization:OAuth "+soundcloudAuth)
+	if p.soundcloudAuthToken != "" {
+		args = append(args, "--add-header", "Authorization:OAuth "+p.soundcloudAuthToken)
 	}
 
 	args = append(args, track.URL)
