@@ -580,8 +580,11 @@ func (ch *CommandHandler) historyHandler(s *discordgo.Session, i *discordgo.Inte
 func (ch *CommandHandler) aboutHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
 		Title:       "About Himiko",
-		Description: "A feature-rich Discord bot written in Go.",
-		Color:       0x5865F2,
+		Description: "*\"I just wanna love you, wanna be loved~\"*\n\nA feature-rich Discord bot written in Go, named after everyone's favorite blood-obsessed villain! She's cute, she's crazy, and she'll manage your server with deadly efficiency~ 💕",
+		Thumbnail: &discordgo.MessageEmbedThumbnail{
+			URL: "https://raw.githubusercontent.com/blubskye/himiko/main/himiko.png",
+		},
+		Color: 0xFF69B4,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Language", Value: "Go", Inline: true},
 			{Name: "Library", Value: "discordgo", Inline: true},
@@ -589,7 +592,8 @@ func (ch *CommandHandler) aboutHandler(s *discordgo.Session, i *discordgo.Intera
 			{Name: "License", Value: "AGPL-3.0", Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Created with Himiko Bot",
+			Text:    "Made with 💉 and obsessive love",
+			IconURL: avatarURL(s.State.User),
 		},
 	}
 
@@ -624,7 +628,10 @@ func (ch *CommandHandler) sourceHandler(s *discordgo.Session, i *discordgo.Inter
 			"- Redistribute copies\n" +
 			"- Distribute your modified versions\n\n" +
 			"If you run a modified version of this bot as a network service, you must make the source code available to users.",
-		Color: 0x5865F2,
+		Thumbnail: &discordgo.MessageEmbedThumbnail{
+			URL: "https://raw.githubusercontent.com/blubskye/himiko/main/himiko.png",
+		},
+		Color: 0xFF69B4,
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "Repository",
@@ -638,7 +645,8 @@ func (ch *CommandHandler) sourceHandler(s *discordgo.Session, i *discordgo.Inter
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Copyright (C) 2025 - Himiko Contributors",
+			Text:    "Copyright (C) 2025 - Himiko Contributors",
+			IconURL: avatarURL(s.State.User),
 		},
 	}
 

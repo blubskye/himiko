@@ -281,7 +281,7 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | **Text** | ascii, zalgo, reverse, upsidedown, morse, vaporwave, owo, mock, leet, regional, spoilertext, encode, decode, codeblock, hyperlink |
 | **Images** | cat, dog, fox, bird, bunny, duck, koala, panda, avatar, banner, servericon, catfact, dogfact, meme |
 | **Utility** | ping, snipe, afk, remind, schedule, poll, embed, clean, firstmessage, uptime, say, stealemoji, math |
-| **Info** | userinfo, serverinfo, channelinfo, roleinfo, emojiinfo, botinfo, inviteinfo, rolelist, membercount |
+| **Info** | userinfo, serverinfo, channelinfo, roleinfo, emojiinfo, botinfo, stats, inviteinfo, rolelist, membercount |
 | **Lookup** | weather, urban, wiki, ip, crypto, minecraft, github, npm, color |
 | **Random** | advice, quote, fact, trivia, wyr, tod, nhie, dadjoke, password |
 | **Tools** | tinyurl, qrcode, timestamp, charcount, snowflake, servers, permissions, raw, messagelink |

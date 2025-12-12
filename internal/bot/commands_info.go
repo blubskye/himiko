@@ -18,9 +18,11 @@ package bot
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/blubskye/himiko/internal/updater"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -103,6 +105,14 @@ func (ch *CommandHandler) registerInfoCommands() {
 		Description: "Get information about the bot",
 		Category:    "Info",
 		Handler:     ch.botInfoHandler,
+	})
+
+	// Stats command
+	ch.Register(&Command{
+		Name:        "stats",
+		Description: "Show detailed bot statistics",
+		Category:    "Info",
+		Handler:     ch.statsHandler,
 	})
 
 	// Invite info
@@ -555,9 +565,11 @@ func (ch *CommandHandler) botInfoHandler(s *discordgo.Session, i *discordgo.Inte
 	guilds := len(s.State.Guilds)
 
 	embed := &discordgo.MessageEmbed{
-		Title:     "Himiko Bot",
-		Thumbnail: &discordgo.MessageEmbedThumbnail{URL: avatarURL(s.State.User)},
-		Color:     0x5865F2,
+		Title: "Himiko Bot",
+		Thumbnail: &discordgo.MessageEmbedThumbnail{
+			URL: "https://raw.githubusercontent.com/blubskye/himiko/main/himiko.png",
+		},
+		Color: 0xFF69B4,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Servers", Value: fmt.Sprintf("%d", guilds), Inline: true},
 			{Name: "Commands", Value: fmt.Sprintf("%d", len(ch.commands)), Inline: true},
@@ -566,7 +578,53 @@ func (ch *CommandHandler) botInfoHandler(s *discordgo.Session, i *discordgo.Inte
 			{Name: "Go Version", Value: "1.21+", Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Made with Go",
+			Text:    "Made with 💉 and obsessive love",
+			IconURL: avatarURL(s.State.User),
+		},
+	}
+
+	respondEmbed(s, i, embed)
+}
+
+func (ch *CommandHandler) statsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// Gather statistics
+	guilds := len(s.State.Guilds)
+	var totalMembers int
+	var totalChannels int
+	for _, guild := range s.State.Guilds {
+		totalMembers += guild.MemberCount
+		totalChannels += len(guild.Channels)
+	}
+
+	// Get database stats
+	commandCount := len(ch.commands)
+
+	// Memory stats
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	memUsed := float64(memStats.Alloc) / 1024 / 1024
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "Himiko Statistics",
+		Description: "*\"Let me show you what I can do~\"*",
+		Thumbnail: &discordgo.MessageEmbedThumbnail{
+			URL: "https://raw.githubusercontent.com/blubskye/himiko/main/himiko.png",
+		},
+		Color: 0xFF69B4,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Servers", Value: fmt.Sprintf("%d", guilds), Inline: true},
+			{Name: "Users", Value: fmt.Sprintf("%d", totalMembers), Inline: true},
+			{Name: "Channels", Value: fmt.Sprintf("%d", totalChannels), Inline: true},
+			{Name: "Commands", Value: fmt.Sprintf("%d", commandCount), Inline: true},
+			{Name: "Uptime", Value: formatDuration(time.Since(botStartTime)), Inline: true},
+			{Name: "Memory", Value: fmt.Sprintf("%.2f MB", memUsed), Inline: true},
+			{Name: "Version", Value: "v" + updater.GetCurrentVersion(), Inline: true},
+			{Name: "Go Version", Value: runtime.Version(), Inline: true},
+			{Name: "Library", Value: "discordgo", Inline: true},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text:    fmt.Sprintf("Started %s • Made with 💉 and obsessive love", botStartTime.Format("Jan 2, 2006 at 3:04 PM")),
+			IconURL: avatarURL(s.State.User),
 		},
 	}
 
