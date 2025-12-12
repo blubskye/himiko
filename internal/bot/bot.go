@@ -96,6 +96,12 @@ func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 
 	// Set status
 	s.UpdateGameStatus(0, "Use /help for commands")
+
+	// Check for updates in background
+	go b.CheckAndNotifyUpdate()
+
+	// Start periodic update checker
+	b.StartPeriodicUpdateCheck()
 }
 
 func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {

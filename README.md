@@ -183,6 +183,15 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 ### 🤖 AI Integration
 - Ask AI questions (requires OpenAI API key or compatible endpoint)
 
+### 🔄 Auto-Update System
+- **Update Checking:** Automatically checks for new versions on startup
+- **Periodic Checks:** Configurable interval for background update checks (default: 24 hours)
+- **Channel Notifications:** Optionally post update notifications to a channel
+- **Manual Updates:** Use `/update check` to check for updates
+- **Easy Apply:** Use `/update apply` to download and install updates
+- **Config Preservation:** Updates keep your config.json intact
+- **Configurable:** Enable/disable auto-update, auto-apply, check interval, and notification channel
+
 ### 🚫 Bot Management (Owner Only)
 - Bot-level bans for users/servers
 - DM forwarding to designated channels
@@ -288,6 +297,7 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | **BotBan** | botban, botunban, botbanlist |
 | **AI** | ask |
 | **Music** | play, skip, stop, pause, resume, queue, nowplaying, remove, clear, movetop, volume, join, leave, musicrole, folders, files, local, search, musicfolder, musichistory |
+| **Update** | update (check/apply/version) |
 | **Misc** | help, command, tag, notify, history, about, invite, source |
 
 ---

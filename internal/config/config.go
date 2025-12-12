@@ -42,11 +42,15 @@ type Config struct {
 
 	// Feature toggles
 	Features struct {
-		DMLogging       bool `json:"dm_logging"`
-		CommandHistory  bool `json:"command_history"`
-		DeleteTimer     int  `json:"delete_timer"` // seconds, 0 = disabled
-		WebhookNotify   bool `json:"webhook_notify"`
-		WebhookURL      string `json:"webhook_url"`
+		DMLogging            bool   `json:"dm_logging"`
+		CommandHistory       bool   `json:"command_history"`
+		DeleteTimer          int    `json:"delete_timer"` // seconds, 0 = disabled
+		WebhookNotify        bool   `json:"webhook_notify"`
+		WebhookURL           string `json:"webhook_url"`
+		AutoUpdate           bool   `json:"auto_update"`            // Check for updates on startup
+		AutoUpdateApply      bool   `json:"auto_update_apply"`      // Automatically apply updates (requires restart)
+		UpdateCheckHours     int    `json:"update_check_hours"`     // Hours between periodic update checks (0 = disabled)
+		UpdateNotifyChannel  string `json:"update_notify_channel"`  // Channel ID to post update notifications
 	} `json:"features"`
 }
 
