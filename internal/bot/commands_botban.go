@@ -94,8 +94,8 @@ func (ch *CommandHandler) registerBotBanCommands() {
 }
 
 func (ch *CommandHandler) botBanHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !isOwner(ch.bot.Config.OwnerID, i.Member.User.ID) {
-		respondEphemeral(s, i, "Only the bot owner can use bot-level bans.")
+	if !ch.bot.Config.IsOwner(i.Member.User.ID) {
+		respondEphemeral(s, i, "Only bot owners can use bot-level bans.")
 		return
 	}
 
@@ -128,8 +128,8 @@ func (ch *CommandHandler) botBanHandler(s *discordgo.Session, i *discordgo.Inter
 }
 
 func (ch *CommandHandler) botUnbanHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !isOwner(ch.bot.Config.OwnerID, i.Member.User.ID) {
-		respondEphemeral(s, i, "Only the bot owner can manage bot-level bans.")
+	if !ch.bot.Config.IsOwner(i.Member.User.ID) {
+		respondEphemeral(s, i, "Only bot owners can manage bot-level bans.")
 		return
 	}
 
@@ -147,8 +147,8 @@ func (ch *CommandHandler) botUnbanHandler(s *discordgo.Session, i *discordgo.Int
 }
 
 func (ch *CommandHandler) botBanListHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !isOwner(ch.bot.Config.OwnerID, i.Member.User.ID) {
-		respondEphemeral(s, i, "Only the bot owner can view bot-level bans.")
+	if !ch.bot.Config.IsOwner(i.Member.User.ID) {
+		respondEphemeral(s, i, "Only bot owners can view bot-level bans.")
 		return
 	}
 

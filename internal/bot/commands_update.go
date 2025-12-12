@@ -53,8 +53,8 @@ func (ch *CommandHandler) registerUpdateCommands() {
 
 func (ch *CommandHandler) updateHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Owner only
-	if i.Member == nil || i.Member.User.ID != ch.bot.Config.OwnerID {
-		respondEphemeral(s, i, "This command is only available to the bot owner.")
+	if i.Member == nil || !ch.bot.Config.IsOwner(i.Member.User.ID) {
+		respondEphemeral(s, i, "This command is only available to bot owners.")
 		return
 	}
 
@@ -290,17 +290,12 @@ func (b *Bot) checkForUpdates(isStartup bool) {
 		// Notify via channel if configured
 		b.sendUpdateNotification(info, true)
 
-		// Notify owner via DM
-		if b.Config.OwnerID != "" {
-			channel, err := b.Session.UserChannelCreate(b.Config.OwnerID)
-			if err == nil {
-				b.Session.ChannelMessageSendEmbed(channel.ID, &discordgo.MessageEmbed{
-					Title:       "Himiko Auto-Updated!",
-					Description: fmt.Sprintf("Updated from v%s to v%s\n\n**Please restart the bot to complete the update.**", info.CurrentVersion, info.NewVersion),
-					Color:       0x57F287,
-				})
-			}
-		}
+		// Notify owners via DM
+		b.notifyOwnersDM(&discordgo.MessageEmbed{
+			Title:       "Himiko Auto-Updated!",
+			Description: fmt.Sprintf("Updated from v%s to v%s\n\n**Please restart the bot to complete the update.**", info.CurrentVersion, info.NewVersion),
+			Color:       0x57F287,
+		})
 
 		// Exit so the bot can be restarted
 		fmt.Println("[Update] Exiting for restart...")
@@ -309,16 +304,31 @@ func (b *Bot) checkForUpdates(isStartup bool) {
 		// Notify via channel if configured
 		b.sendUpdateNotification(info, false)
 
-		// Notify owner via DM
-		if b.Config.OwnerID != "" {
-			channel, err := b.Session.UserChannelCreate(b.Config.OwnerID)
-			if err == nil {
-				b.Session.ChannelMessageSendEmbed(channel.ID, &discordgo.MessageEmbed{
-					Title:       "Himiko Update Available!",
-					Description: fmt.Sprintf("A new version is available: **v%s** (current: v%s)\n\nUse `/update apply` to download and install.", info.NewVersion, info.CurrentVersion),
-					Color:       0x5865F2,
-				})
-			}
+		// Notify owners via DM
+		b.notifyOwnersDM(&discordgo.MessageEmbed{
+			Title:       "Himiko Update Available!",
+			Description: fmt.Sprintf("A new version is available: **v%s** (current: v%s)\n\nUse `/update apply` to download and install.", info.NewVersion, info.CurrentVersion),
+			Color:       0x5865F2,
+		})
+	}
+}
+
+// notifyOwnersDM sends a DM to all configured bot owners
+func (b *Bot) notifyOwnersDM(embed *discordgo.MessageEmbed) {
+	// Collect all owner IDs
+	ownerIDs := make(map[string]bool)
+	if b.Config.OwnerID != "" {
+		ownerIDs[b.Config.OwnerID] = true
+	}
+	for _, id := range b.Config.OwnerIDs {
+		ownerIDs[id] = true
+	}
+
+	// Send DM to each owner
+	for ownerID := range ownerIDs {
+		channel, err := b.Session.UserChannelCreate(ownerID)
+		if err == nil {
+			b.Session.ChannelMessageSendEmbed(channel.ID, embed)
 		}
 	}
 }

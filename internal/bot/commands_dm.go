@@ -57,8 +57,8 @@ func (ch *CommandHandler) registerDMCommands() {
 }
 
 func (ch *CommandHandler) setDMChannelHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !isOwner(ch.bot.Config.OwnerID, i.Member.User.ID) {
-		respondEphemeral(s, i, "Only the bot owner can configure DM forwarding.")
+	if !ch.bot.Config.IsOwner(i.Member.User.ID) {
+		respondEphemeral(s, i, "Only bot owners can configure DM forwarding.")
 		return
 	}
 
@@ -80,8 +80,8 @@ func (ch *CommandHandler) setDMChannelHandler(s *discordgo.Session, i *discordgo
 }
 
 func (ch *CommandHandler) disableDMHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !isOwner(ch.bot.Config.OwnerID, i.Member.User.ID) {
-		respondEphemeral(s, i, "Only the bot owner can configure DM forwarding.")
+	if !ch.bot.Config.IsOwner(i.Member.User.ID) {
+		respondEphemeral(s, i, "Only bot owners can configure DM forwarding.")
 		return
 	}
 
@@ -129,7 +129,3 @@ func (ch *CommandHandler) dmStatusHandler(s *discordgo.Session, i *discordgo.Int
 	respondEmbed(s, i, embed)
 }
 
-// Helper function to check if user is bot owner
-func isOwner(ownerID, userID string) bool {
-	return ownerID == userID
-}

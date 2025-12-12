@@ -18,14 +18,17 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"time"
 )
 
 type Config struct {
-	Token        string `json:"token"`
-	Prefix       string `json:"prefix"`
-	DatabasePath string `json:"database_path"`
-	OwnerID      string `json:"owner_id"`
+	Token        string   `json:"token"`
+	Prefix       string   `json:"prefix"`
+	DatabasePath string   `json:"database_path"`
+	OwnerID      string   `json:"owner_id"`       // Single owner (backwards compatible)
+	OwnerIDs     []string `json:"owner_ids"`      // Multiple owners
 
 	// API Keys for various services
 	APIs struct {
@@ -102,7 +105,53 @@ func Load(path string) (*Config, error) {
 		cfg.APIs.OpenAIModel = "gpt-3.5-turbo"
 	}
 
+	// Check if migration is needed (new fields added)
+	migrated := migrateConfig(&cfg, data, path)
+	if migrated {
+		// Save the migrated config
+		if err := cfg.Save(path); err != nil {
+			fmt.Printf("Warning: Failed to save migrated config: %v\n", err)
+		}
+	}
+
 	return &cfg, nil
+}
+
+// migrateConfig checks if the config needs migration and backs up old config if needed
+func migrateConfig(cfg *Config, originalData []byte, path string) bool {
+	// Check if config has new fields by comparing JSON
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(originalData, &rawMap); err != nil {
+		return false
+	}
+
+	needsMigration := false
+
+	// Check for owner_ids field (new in 1.5.3)
+	if _, exists := rawMap["owner_ids"]; !exists {
+		needsMigration = true
+	}
+
+	if needsMigration {
+		// Backup old config
+		backupPath := fmt.Sprintf("%s.backup.%s", path, time.Now().Format("20060102-150405"))
+		if err := os.WriteFile(backupPath, originalData, 0600); err != nil {
+			fmt.Printf("Warning: Failed to backup config to %s: %v\n", backupPath, err)
+		} else {
+			fmt.Printf("Config backed up to %s\n", backupPath)
+		}
+
+		// Migrate owner_id to owner_ids if owner_id is set and owner_ids is empty
+		if cfg.OwnerID != "" && len(cfg.OwnerIDs) == 0 {
+			cfg.OwnerIDs = []string{cfg.OwnerID}
+			fmt.Println("Migrated owner_id to owner_ids array")
+		}
+
+		fmt.Println("Config migrated to new format")
+		return true
+	}
+
+	return false
 }
 
 func (c *Config) Save(path string) error {
@@ -111,4 +160,21 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+// IsOwner checks if the given user ID is a bot owner
+func (c *Config) IsOwner(userID string) bool {
+	// Check single owner (backwards compatibility)
+	if c.OwnerID != "" && c.OwnerID == userID {
+		return true
+	}
+
+	// Check multiple owners
+	for _, id := range c.OwnerIDs {
+		if id == userID {
+			return true
+		}
+	}
+
+	return false
 }
