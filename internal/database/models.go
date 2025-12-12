@@ -239,3 +239,10 @@ type SpamFilterConfig struct {
 	MaxEmojis   int
 	Action      string // delete, warn, kick, ban
 }
+
+// Ticket System Config
+type TicketConfig struct {
+	GuildID   string
+	ChannelID string
+	Enabled   bool
+}

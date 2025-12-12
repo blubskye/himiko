@@ -70,6 +70,7 @@ func NewCommandHandler(b *Bot) *CommandHandler {
 	ch.registerModStatsCommands()
 	ch.registerSpamCommands()
 	ch.registerMentionCommands()
+	ch.registerTicketCommands()
 
 	return ch
 }

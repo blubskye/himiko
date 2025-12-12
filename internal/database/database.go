@@ -300,6 +300,14 @@ func (d *DB) migrate() error {
 		action TEXT DEFAULT 'delete'
 	);
 
+	-- Ticket system configuration
+	CREATE TABLE IF NOT EXISTS ticket_config (
+		guild_id TEXT PRIMARY KEY,
+		channel_id TEXT NOT NULL,
+		enabled INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_xp_guild ON user_xp(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_regex_filters_guild ON regex_filters(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_level_ranks_guild ON level_ranks(guild_id);
@@ -1301,5 +1309,31 @@ func (d *DB) SetSpamFilterConfig(sf *SpamFilterConfig) error {
 		enabled = excluded.enabled, max_mentions = excluded.max_mentions,
 		max_links = excluded.max_links, max_emojis = excluded.max_emojis, action = excluded.action`,
 		sf.GuildID, sf.Enabled, sf.MaxMentions, sf.MaxLinks, sf.MaxEmojis, sf.Action)
+	return err
+}
+
+// ============ Ticket System ============
+
+func (d *DB) GetTicketConfig(guildID string) (*TicketConfig, error) {
+	var tc TicketConfig
+	err := d.QueryRow(`SELECT guild_id, channel_id, enabled FROM ticket_config WHERE guild_id = ?`, guildID).Scan(
+		&tc.GuildID, &tc.ChannelID, &tc.Enabled)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &tc, err
+}
+
+func (d *DB) SetTicketConfig(guildID, channelID string, enabled bool) error {
+	_, err := d.Exec(`INSERT INTO ticket_config (guild_id, channel_id, enabled)
+		VALUES (?, ?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET
+		channel_id = excluded.channel_id, enabled = excluded.enabled`,
+		guildID, channelID, enabled)
+	return err
+}
+
+func (d *DB) DeleteTicketConfig(guildID string) error {
+	_, err := d.Exec(`DELETE FROM ticket_config WHERE guild_id = ?`, guildID)
 	return err
 }
