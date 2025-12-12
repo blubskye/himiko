@@ -46,6 +46,12 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - **Regex Filters:** Custom pattern matching with actions (delete/warn/ban)
 - **Test Filters:** Test patterns before enabling
 - **Per-Channel Config:** Disable logging for specific channels
+- **Spam Filter:** Limit mentions, links, and emojis with configurable actions
+
+### 📊 Moderation Stats
+- **Track Mod Actions:** Import and track bans, kicks, timeouts
+- **Mod Stats:** See which moderators are most active
+- **User History:** View moderation history for specific users
 
 ### 🧹 Auto-Clean System
 - **Channel Cleaning:** Automatically clean channels on schedule
@@ -130,6 +136,19 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - Raw message content
 - Message link generator
 - **Ban Export/Import** - Share ban lists between servers!
+
+### 🎫 Ticket System
+- **Submit Tickets:** Users can report issues to staff
+- **Configurable Channel:** Set where tickets are forwarded
+- **Clean Interface:** User messages are ephemeral, staff sees formatted embed
+
+### 💬 Mention Responses
+- **Custom Triggers:** Set responses when bot is mentioned with keywords
+- **Image Support:** Include images in responses
+
+### 📨 Join DM Messages
+- **Welcome DMs:** Send customizable DMs to new members
+- **Embed Support:** Include title and message with placeholders
 
 ### ⚙️ Settings
 - Custom prefix
@@ -232,7 +251,11 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | **Random** | advice, quote, fact, trivia, wyr, tod, nhie, dadjoke, password |
 | **Tools** | tinyurl, qrcode, timestamp, charcount, snowflake, servers, permissions, raw, messagelink |
 | **BanExport** | exportbans, importbans, scanbans |
-| **Settings** | setprefix, setmodlog, setwelcome, disablewelcome, settings |
+| **ModStats** | modstats, importmodhistory, modhistory |
+| **SpamFilter** | spamfilter (status/enable/disable/set) |
+| **Mentions** | mention (add/remove/list) |
+| **Ticket** | ticket, setticket, disableticket, ticketstatus |
+| **Settings** | setprefix, setmodlog, setwelcome, disablewelcome, setjoindm, disablejoindm, settings |
 | **DM** | setdmchannel, disabledm, dmstatus |
 | **BotBan** | botban, botunban, botbanlist |
 | **AI** | ask |
