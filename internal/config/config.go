@@ -20,8 +20,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
+
+const MaxConfigBackups = 3
 
 type Config struct {
 	Token        string   `json:"token"`
@@ -56,6 +61,15 @@ type Config struct {
 		UpdateNotifyChannel string `json:"update_notify_channel"` // Channel ID to post update notifications
 		DebugMode           bool   `json:"debug_mode"`            // Enable verbose logging and stack traces
 	} `json:"features"`
+
+	// Web server configuration
+	WebServer struct {
+		Enabled     bool   `json:"enabled"`      // Enable/disable the web server
+		Port        int    `json:"port"`         // Port to listen on (default: 8080)
+		Host        string `json:"host"`         // Host to bind to (default: "127.0.0.1" for local only)
+		SecretKey   string `json:"secret_key"`   // Secret key for session encryption
+		AllowRemote bool   `json:"allow_remote"` // Allow connections from non-localhost (for NGINX proxy)
+	} `json:"webserver"`
 }
 
 func Load(path string) (*Config, error) {
@@ -105,6 +119,13 @@ func Load(path string) (*Config, error) {
 	if cfg.APIs.OpenAIModel == "" {
 		cfg.APIs.OpenAIModel = "gpt-3.5-turbo"
 	}
+	// Set webserver defaults
+	if cfg.WebServer.Port == 0 {
+		cfg.WebServer.Port = 8080
+	}
+	if cfg.WebServer.Host == "" {
+		cfg.WebServer.Host = "127.0.0.1"
+	}
 
 	// Check if migration is needed (new fields added)
 	migrated := migrateConfig(&cfg, data, path)
@@ -147,6 +168,8 @@ func migrateConfig(cfg *Config, originalData []byte, path string) bool {
 			fmt.Printf("Warning: Failed to backup config to %s: %v\n", backupPath, err)
 		} else {
 			fmt.Printf("Config backed up to %s\n", backupPath)
+			// Clean up old backups, keeping only the most recent MaxConfigBackups
+			cleanupOldBackups(path)
 		}
 
 		// Migrate owner_id to owner_ids if owner_id is set and owner_ids is empty
@@ -160,6 +183,44 @@ func migrateConfig(cfg *Config, originalData []byte, path string) bool {
 	}
 
 	return false
+}
+
+// cleanupOldBackups removes old config backups, keeping only the most recent MaxConfigBackups
+func cleanupOldBackups(configPath string) {
+	dir := filepath.Dir(configPath)
+	base := filepath.Base(configPath)
+	pattern := base + ".backup."
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	// Find all backup files
+	var backups []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), pattern) {
+			backups = append(backups, filepath.Join(dir, entry.Name()))
+		}
+	}
+
+	// If we have more than MaxConfigBackups, delete the oldest ones
+	if len(backups) <= MaxConfigBackups {
+		return
+	}
+
+	// Sort by name (which includes timestamp, so older files come first)
+	sort.Strings(backups)
+
+	// Delete oldest backups, keeping only the most recent MaxConfigBackups
+	toDelete := len(backups) - MaxConfigBackups
+	for i := 0; i < toDelete; i++ {
+		if err := os.Remove(backups[i]); err != nil {
+			fmt.Printf("Warning: Failed to delete old backup %s: %v\n", backups[i], err)
+		} else {
+			fmt.Printf("Deleted old config backup: %s\n", filepath.Base(backups[i]))
+		}
+	}
 }
 
 func (c *Config) Save(path string) error {

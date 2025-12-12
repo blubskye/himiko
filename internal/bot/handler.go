@@ -130,6 +130,7 @@ func NewCommandHandler(b *Bot) *CommandHandler {
 	ch.registerAntiSpamCommands()
 	ch.registerMusicCommands()
 	ch.registerUpdateCommands()
+	ch.registerWebServerCommands()
 
 	return ch
 }

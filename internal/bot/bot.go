@@ -23,6 +23,7 @@ import (
 
 	"github.com/blubskye/himiko/internal/config"
 	"github.com/blubskye/himiko/internal/database"
+	"github.com/blubskye/himiko/internal/webserver"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -33,6 +34,7 @@ type Bot struct {
 	Commands     *CommandHandler
 	MusicManager *MusicManager
 	Debug        *DebugLogger
+	WebServer    *webserver.Server
 	stopChan     chan struct{}
 }
 
@@ -51,6 +53,7 @@ func New(cfg *config.Config, db *database.DB) (*Bot, error) {
 		DB:           db,
 		MusicManager: NewMusicManager(cfg.APIs.YouTubeAPIKey, cfg.APIs.SoundCloudAuthToken),
 		Debug:        NewDebugLogger(cfg.Features.DebugMode),
+		WebServer:    webserver.New(cfg, db, session),
 		stopChan:     make(chan struct{}),
 	}
 
@@ -84,11 +87,23 @@ func (b *Bot) Start() error {
 	// Start background tasks
 	go b.runScheduledTasks()
 
+	// Start web server if enabled
+	if b.Config.WebServer.Enabled {
+		if err := b.WebServer.Start(); err != nil {
+			log.Printf("Warning: Failed to start web server: %v", err)
+		}
+	}
+
 	return nil
 }
 
 func (b *Bot) Stop() {
 	close(b.stopChan)
+
+	// Stop web server if running
+	if b.WebServer.IsRunning() {
+		b.WebServer.Stop()
+	}
 
 	// Unregister commands on shutdown (optional)
 	// b.Commands.UnregisterCommands()

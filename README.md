@@ -189,8 +189,17 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - **Channel Notifications:** Optionally post update notifications to a channel
 - **Manual Updates:** Use `/update check` to check for updates
 - **Easy Apply:** Use `/update apply` to download and install updates
-- **Config Preservation:** Updates keep your config.json intact
+- **Auto-Relaunch:** Bot automatically restarts with new version after update
+- **Config Preservation:** Updates keep your config.json intact (max 3 backups)
 - **Configurable:** Enable/disable auto-update, auto-apply, check interval, and notification channel
+
+### 🌐 Web Dashboard
+- **Server Management:** Visual dashboard to manage servers and settings
+- **Stats Overview:** View bot statistics, server counts, member counts
+- **Guild Settings:** Configure prefix, welcome messages, and more per-server
+- **Toggle Control:** Enable/disable via `/webserver on` and `/webserver off`
+- **NGINX Ready:** Designed to work behind NGINX reverse proxy
+- **Local by Default:** Binds to 127.0.0.1 for security, configurable for remote access
 
 ### 🐛 Debug Mode
 - **Full Stack Traces:** Enable verbose logging with complete stack traces
@@ -246,6 +255,13 @@ Copy `config.example.json` to `config.json` and fill in your details:
     "update_check_hours": 24,
     "update_notify_channel": "",
     "debug_mode": false
+  },
+  "webserver": {
+    "enabled": false,
+    "port": 8080,
+    "host": "127.0.0.1",
+    "secret_key": "",
+    "allow_remote": false
   }
 }
 ```
@@ -323,6 +339,7 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | **AI** | ask |
 | **Music** | play, skip, stop, pause, resume, queue, nowplaying, remove, clear, movetop, volume, join, leave, musicrole, folders, files, local, search, musicfolder, musichistory |
 | **Update** | update (check/apply/version) |
+| **WebServer** | webserver (on/off/status/config) |
 | **Misc** | help, command, tag, notify, history, about, invite, source |
 
 ---

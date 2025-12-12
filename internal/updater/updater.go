@@ -23,15 +23,17 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 const (
 	GitHubRepo    = "blubskye/himiko"
 	GitHubAPIURL  = "https://api.github.com/repos/" + GitHubRepo + "/releases/latest"
-	CurrentVersion = "1.5.5"
+	CurrentVersion = "1.5.6"
 )
 
 // Release represents a GitHub release
@@ -358,4 +360,35 @@ func extractFile(f *zip.File, destPath string) error {
 // GetCurrentVersion returns the current version
 func GetCurrentVersion() string {
 	return CurrentVersion
+}
+
+// RelaunchAfterUpdate relaunches the bot executable after an update
+// This uses exec on Unix systems to replace the current process
+func RelaunchAfterUpdate() error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve executable path: %w", err)
+	}
+
+	// On Windows, we need to start a new process and exit
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command(execPath)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to start new process: %w", err)
+		}
+		// Exit the current process
+		os.Exit(0)
+		return nil
+	}
+
+	// On Unix systems, use syscall.Exec to replace the current process
+	// This preserves the PID and cleanly transitions to the new binary
+	return syscall.Exec(execPath, []string{execPath}, os.Environ())
 }

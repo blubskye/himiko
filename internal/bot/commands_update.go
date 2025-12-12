@@ -167,14 +167,24 @@ func (ch *CommandHandler) updateApplyHandler(s *discordgo.Session, i *discordgo.
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "Update Applied Successfully!",
-		Description: fmt.Sprintf("Updated from v%s to v%s\n\n**The bot needs to be restarted to use the new version.**", info.CurrentVersion, info.NewVersion),
+		Description: fmt.Sprintf("Updated from v%s to v%s\n\n**Relaunching bot with new version...**", info.CurrentVersion, info.NewVersion),
 		Color:       0x57F287,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Restart the bot to complete the update",
+			Text: "Bot is relaunching automatically",
 		},
 	}
 
 	editResponseEmbed(s, i, embed)
+
+	// Give Discord a moment to receive the response
+	time.Sleep(2 * time.Second)
+
+	// Relaunch the bot with the new executable
+	if err := updater.RelaunchAfterUpdate(); err != nil {
+		// If relaunch fails, log it and notify the user
+		fmt.Printf("[Update] Failed to relaunch: %v\n", err)
+		followUp(s, i, fmt.Sprintf("Failed to auto-relaunch: %v\nPlease restart the bot manually.", err))
+	}
 }
 
 func (ch *CommandHandler) updateVersionHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -285,7 +295,7 @@ func (b *Bot) checkForUpdates(isStartup bool) {
 			return
 		}
 
-		fmt.Println("[Update] Update applied! Restart the bot to use the new version.")
+		fmt.Println("[Update] Update applied! Relaunching with new version...")
 
 		// Notify via channel if configured
 		b.sendUpdateNotification(info, true)
@@ -293,13 +303,20 @@ func (b *Bot) checkForUpdates(isStartup bool) {
 		// Notify owners via DM
 		b.notifyOwnersDM(&discordgo.MessageEmbed{
 			Title:       "Himiko Auto-Updated!",
-			Description: fmt.Sprintf("Updated from v%s to v%s\n\n**Please restart the bot to complete the update.**", info.CurrentVersion, info.NewVersion),
+			Description: fmt.Sprintf("Updated from v%s to v%s\n\n**Bot is relaunching automatically...**", info.CurrentVersion, info.NewVersion),
 			Color:       0x57F287,
 		})
 
-		// Exit so the bot can be restarted
-		fmt.Println("[Update] Exiting for restart...")
-		os.Exit(0)
+		// Give Discord a moment to send notifications
+		time.Sleep(2 * time.Second)
+
+		// Relaunch the bot with the new executable
+		fmt.Println("[Update] Relaunching...")
+		if err := updater.RelaunchAfterUpdate(); err != nil {
+			fmt.Printf("[Update] Failed to relaunch: %v\n", err)
+			fmt.Println("[Update] Exiting for manual restart...")
+			os.Exit(0)
+		}
 	} else {
 		// Notify via channel if configured
 		b.sendUpdateNotification(info, false)
