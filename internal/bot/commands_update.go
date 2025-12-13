@@ -30,25 +30,161 @@ func (ch *CommandHandler) registerUpdateCommands() {
 		Name:        "update",
 		Description: "Check for and apply bot updates (Owner only)",
 		Category:    "Admin",
-		Options: []*discordgo.ApplicationCommandOption{
+		PrefixOnly:  true, // Owner-only command, prefix-only to stay under 100 slash command limit
+		PrefixHandler: func(ctx *PrefixContext) {
+			ch.updatePrefixHandler(ctx)
+		},
+	})
+}
+
+// updatePrefixHandler handles prefix-based update commands
+func (ch *CommandHandler) updatePrefixHandler(ctx *PrefixContext) {
+	// Owner only
+	if !ch.bot.Config.IsOwner(ctx.Author.ID) {
+		ctx.Reply("This command is only available to bot owners.")
+		return
+	}
+
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "update <check|apply|version>`")
+		return
+	}
+
+	subCmd := ctx.Args[0]
+
+	switch subCmd {
+	case "check":
+		ch.updateCheckPrefix(ctx)
+	case "apply":
+		ch.updateApplyPrefix(ctx)
+	case "version":
+		ch.updateVersionPrefix(ctx)
+	default:
+		ctx.Reply("Unknown subcommand. Usage: `" + ctx.Prefix + "update <check|apply|version>`")
+	}
+}
+
+func (ch *CommandHandler) updateCheckPrefix(ctx *PrefixContext) {
+	info, err := updater.CheckForUpdateByPattern()
+	if err != nil {
+		ctx.Reply("Failed to check for updates: " + err.Error())
+		return
+	}
+
+	if !info.Available {
+		embed := &discordgo.MessageEmbed{
+			Title:       "No Updates Available",
+			Description: fmt.Sprintf("You are running the latest version (**v%s**).", info.CurrentVersion),
+			Color:       0x57F287,
+		}
+		ctx.ReplyEmbed(embed)
+		return
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "Update Available!",
+		Description: fmt.Sprintf("A new version is available: **v%s** (current: v%s)", info.NewVersion, info.CurrentVersion),
+		Color:       0x5865F2,
+		Fields: []*discordgo.MessageEmbedField{
 			{
-				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "check",
-				Description: "Check if a new version is available",
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "apply",
-				Description: "Download and apply the latest update",
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "version",
-				Description: "Show current version",
+				Name:  "Download Size",
+				Value: formatBytes(info.Size),
 			},
 		},
-		Handler: ch.updateHandler,
-	})
+	}
+
+	if info.ReleaseNotes != "" {
+		notes := info.ReleaseNotes
+		if len(notes) > 1000 {
+			notes = notes[:1000] + "..."
+		}
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:  "Release Notes",
+			Value: notes,
+		})
+	}
+
+	embed.Footer = &discordgo.MessageEmbedFooter{
+		Text: "Use " + ctx.Prefix + "update apply to download and install",
+	}
+
+	ctx.ReplyEmbed(embed)
+}
+
+func (ch *CommandHandler) updateApplyPrefix(ctx *PrefixContext) {
+	ctx.Reply("Checking for updates...")
+
+	info, err := updater.CheckForUpdateByPattern()
+	if err != nil {
+		ctx.Reply("Failed to check for updates: " + err.Error())
+		return
+	}
+
+	if !info.Available {
+		ctx.Reply("No updates available. You are running the latest version.")
+		return
+	}
+
+	ctx.Reply(fmt.Sprintf("Downloading update v%s (%s)...", info.NewVersion, formatBytes(info.Size)))
+
+	zipPath, err := updater.DownloadUpdate(info, nil)
+	if err != nil {
+		ctx.Reply("Failed to download update: " + err.Error())
+		return
+	}
+
+	ctx.Reply("Download complete. Applying update...")
+
+	if err := updater.ApplyUpdate(zipPath); err != nil {
+		ctx.Reply("Failed to apply update: " + err.Error())
+		return
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "Update Applied Successfully!",
+		Description: fmt.Sprintf("Updated from v%s to v%s\n\n**Relaunching bot with new version...**", info.CurrentVersion, info.NewVersion),
+		Color:       0x57F287,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Bot is relaunching automatically",
+		},
+	}
+
+	ctx.ReplyEmbed(embed)
+
+	// Give Discord a moment to receive the response
+	time.Sleep(2 * time.Second)
+
+	// Relaunch the bot with the new executable
+	if err := updater.RelaunchAfterUpdate(); err != nil {
+		fmt.Printf("[Update] Failed to relaunch: %v\n", err)
+		ctx.Reply(fmt.Sprintf("Failed to auto-relaunch: %v\nPlease restart the bot manually.", err))
+	}
+}
+
+func (ch *CommandHandler) updateVersionPrefix(ctx *PrefixContext) {
+	embed := &discordgo.MessageEmbed{
+		Title: "Himiko Version Info",
+		Color: 0xFF69B4,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Current Version",
+				Value:  "v" + updater.GetCurrentVersion(),
+				Inline: true,
+			},
+			{
+				Name:   "Auto-Update Check",
+				Value:  boolToEnabled(ch.bot.Config.Features.AutoUpdate),
+				Inline: true,
+			},
+			{
+				Name:   "Auto-Apply Updates",
+				Value:  boolToEnabled(ch.bot.Config.Features.AutoUpdateApply),
+				Inline: true,
+			},
+		},
+	}
+
+	ctx.ReplyEmbed(embed)
 }
 
 func (ch *CommandHandler) updateHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
