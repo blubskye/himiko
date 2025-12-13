@@ -34,3 +34,6 @@ config.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Developer notes (local only)
+DEVELOPER_NOTES.md
