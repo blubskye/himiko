@@ -27,68 +27,39 @@ func (ch *CommandHandler) registerWebServerCommands() {
 		Name:        "webserver",
 		Description: "Manage the web dashboard server (Owner only)",
 		Category:    "Admin",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "on",
-				Description: "Start the web dashboard server",
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "off",
-				Description: "Stop the web dashboard server",
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "status",
-				Description: "Check the web dashboard server status",
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "config",
-				Description: "View or modify web server configuration",
-				Options: []*discordgo.ApplicationCommandOption{
-					{
-						Type:        discordgo.ApplicationCommandOptionInteger,
-						Name:        "port",
-						Description: "Port to listen on (default: 8080)",
-						Required:    false,
-						MinValue:    floatPtr(1),
-						MaxValue:    65535,
-					},
-					{
-						Type:        discordgo.ApplicationCommandOptionBoolean,
-						Name:        "allow_remote",
-						Description: "Allow connections from non-localhost (for NGINX proxy)",
-						Required:    false,
-					},
-				},
-			},
+		PrefixOnly:  true, // Owner-only command, no need for slash command
+		PrefixHandler: func(ctx *PrefixContext) {
+			ch.webserverPrefixHandler(ctx)
 		},
-		Handler: ch.webserverHandler,
 	})
 }
 
-func (ch *CommandHandler) webserverHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+// webserverPrefixHandler handles prefix-based webserver commands
+func (ch *CommandHandler) webserverPrefixHandler(ctx *PrefixContext) {
 	// Owner only
-	if i.Member == nil || !ch.bot.Config.IsOwner(i.Member.User.ID) {
-		respondEphemeral(s, i, "This command is only available to bot owners.")
+	if !ch.bot.Config.IsOwner(ctx.Author.ID) {
+		ctx.Reply("This command is only available to bot owners.")
 		return
 	}
 
-	subCmd := getSubcommandName(i)
+	if len(ctx.Args) == 0 {
+		ctx.Reply("Usage: `" + ctx.Prefix + "webserver <on|off|status|config>`")
+		return
+	}
+
+	subCmd := ctx.Args[0]
 
 	switch subCmd {
 	case "on":
-		ch.webserverOnHandler(s, i)
+		ch.webserverOnPrefix(ctx)
 	case "off":
-		ch.webserverOffHandler(s, i)
+		ch.webserverOffPrefix(ctx)
 	case "status":
-		ch.webserverStatusHandler(s, i)
+		ch.webserverStatusPrefix(ctx)
 	case "config":
-		ch.webserverConfigHandler(s, i)
+		ch.webserverConfigPrefix(ctx)
 	default:
-		respondEphemeral(s, i, "Unknown subcommand.")
+		ctx.Reply("Unknown subcommand. Usage: `" + ctx.Prefix + "webserver <on|off|status|config>`")
 	}
 }
 
@@ -275,4 +246,187 @@ func getSubcommandOptions(i *discordgo.InteractionCreate) []*discordgo.Applicati
 	}
 	subCmd := i.ApplicationCommandData().Options[0]
 	return subCmd.Options
+}
+
+// Prefix command handlers
+
+func (ch *CommandHandler) webserverOnPrefix(ctx *PrefixContext) {
+	if ch.bot.WebServer.IsRunning() {
+		ctx.Reply("The web server is already running.")
+		return
+	}
+
+	if err := ch.bot.WebServer.Start(); err != nil {
+		ctx.Reply(fmt.Sprintf("Failed to start web server: %v", err))
+		return
+	}
+
+	// Update config to persist the setting
+	ch.bot.Config.WebServer.Enabled = true
+	ch.bot.Config.Save("config.json")
+
+	addr := fmt.Sprintf("http://%s:%d", ch.bot.Config.WebServer.Host, ch.bot.Config.WebServer.Port)
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "Web Server Started",
+		Description: fmt.Sprintf("The dashboard is now available at:\n**%s**", addr),
+		Color:       0x57F287,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Host",
+				Value:  ch.bot.Config.WebServer.Host,
+				Inline: true,
+			},
+			{
+				Name:   "Port",
+				Value:  fmt.Sprintf("%d", ch.bot.Config.WebServer.Port),
+				Inline: true,
+			},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Configure NGINX to proxy this for external access",
+		},
+	}
+
+	ctx.ReplyEmbed(embed)
+}
+
+func (ch *CommandHandler) webserverOffPrefix(ctx *PrefixContext) {
+	if !ch.bot.WebServer.IsRunning() {
+		ctx.Reply("The web server is not running.")
+		return
+	}
+
+	if err := ch.bot.WebServer.Stop(); err != nil {
+		ctx.Reply(fmt.Sprintf("Failed to stop web server: %v", err))
+		return
+	}
+
+	// Update config to persist the setting
+	ch.bot.Config.WebServer.Enabled = false
+	ch.bot.Config.Save("config.json")
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "Web Server Stopped",
+		Description: "The dashboard has been shut down.",
+		Color:       0xED4245,
+	}
+
+	ctx.ReplyEmbed(embed)
+}
+
+func (ch *CommandHandler) webserverStatusPrefix(ctx *PrefixContext) {
+	running := ch.bot.WebServer.IsRunning()
+
+	var status, statusEmoji string
+	var color int
+	if running {
+		status = "Running"
+		statusEmoji = "🟢"
+		color = 0x57F287
+	} else {
+		status = "Stopped"
+		statusEmoji = "🔴"
+		color = 0xED4245
+	}
+
+	addr := fmt.Sprintf("http://%s:%d", ch.bot.Config.WebServer.Host, ch.bot.Config.WebServer.Port)
+
+	embed := &discordgo.MessageEmbed{
+		Title: "Web Server Status",
+		Color: color,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Status",
+				Value:  fmt.Sprintf("%s %s", statusEmoji, status),
+				Inline: true,
+			},
+			{
+				Name:   "Auto-Start",
+				Value:  boolToEnabled(ch.bot.Config.WebServer.Enabled),
+				Inline: true,
+			},
+			{
+				Name:   "Address",
+				Value:  addr,
+				Inline: false,
+			},
+			{
+				Name:   "Allow Remote",
+				Value:  boolToEnabled(ch.bot.Config.WebServer.AllowRemote),
+				Inline: true,
+			},
+		},
+	}
+
+	ctx.ReplyEmbed(embed)
+}
+
+func (ch *CommandHandler) webserverConfigPrefix(ctx *PrefixContext) {
+	// Parse args: config [port <num>] [allow_remote <true|false>]
+	if len(ctx.Args) < 2 {
+		// Just show current config
+		ch.webserverStatusPrefix(ctx)
+		return
+	}
+
+	changed := false
+	for i := 1; i < len(ctx.Args); i += 2 {
+		if i+1 >= len(ctx.Args) {
+			break
+		}
+		key := ctx.Args[i]
+		value := ctx.Args[i+1]
+
+		switch key {
+		case "port":
+			var port int
+			fmt.Sscanf(value, "%d", &port)
+			if port >= 1 && port <= 65535 {
+				ch.bot.Config.WebServer.Port = port
+				changed = true
+			}
+		case "allow_remote":
+			ch.bot.Config.WebServer.AllowRemote = value == "true" || value == "1" || value == "yes"
+			changed = true
+		}
+	}
+
+	if changed {
+		// Save config
+		if err := ch.bot.Config.Save("config.json"); err != nil {
+			ctx.Reply(fmt.Sprintf("Failed to save config: %v", err))
+			return
+		}
+
+		needsRestart := ch.bot.WebServer.IsRunning()
+
+		embed := &discordgo.MessageEmbed{
+			Title:       "Web Server Configuration Updated",
+			Description: "The configuration has been saved.",
+			Color:       0x57F287,
+			Fields: []*discordgo.MessageEmbedField{
+				{
+					Name:   "Port",
+					Value:  fmt.Sprintf("%d", ch.bot.Config.WebServer.Port),
+					Inline: true,
+				},
+				{
+					Name:   "Allow Remote",
+					Value:  boolToEnabled(ch.bot.Config.WebServer.AllowRemote),
+					Inline: true,
+				},
+			},
+		}
+
+		if needsRestart {
+			embed.Footer = &discordgo.MessageEmbedFooter{
+				Text: "Restart the web server for changes to take effect",
+			}
+		}
+
+		ctx.ReplyEmbed(embed)
+	} else {
+		ctx.Reply("Usage: `" + ctx.Prefix + "webserver config port <number>` or `" + ctx.Prefix + "webserver config allow_remote <true|false>`")
+	}
 }
