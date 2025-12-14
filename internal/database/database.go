@@ -424,6 +424,17 @@ func (d *DB) migrate() error {
 		played_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	-- Disabled commands/categories per guild
+	CREATE TABLE IF NOT EXISTS guild_disabled_commands (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		command_name TEXT,
+		category TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(guild_id, command_name),
+		UNIQUE(guild_id, category)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_xp_guild ON user_xp(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_member_joins_guild ON member_joins(guild_id, joined_at);
 	CREATE INDEX IF NOT EXISTS idx_scheduled_events_time ON scheduled_events(execute_at);
@@ -436,6 +447,7 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_user_activity_guild ON user_activity(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_music_queue_guild ON music_queue(guild_id, position);
 	CREATE INDEX IF NOT EXISTS idx_music_history_guild ON music_history(guild_id);
+	CREATE INDEX IF NOT EXISTS idx_disabled_commands_guild ON guild_disabled_commands(guild_id);
 	`
 
 	_, err := d.Exec(schema)
@@ -1913,4 +1925,146 @@ func (d *DB) GetMusicHistory(guildID string, limit int) ([]MusicHistory, error) 
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// ============ Disabled Commands/Categories ============
+
+// IsCommandDisabled checks if a specific command is disabled for a guild
+func (d *DB) IsCommandDisabled(guildID, commandName string) bool {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM guild_disabled_commands WHERE guild_id = ? AND command_name = ?`,
+		guildID, commandName).Scan(&count)
+	if err != nil {
+		return false
+	}
+	return count > 0
+}
+
+// IsCategoryDisabled checks if a category is disabled for a guild
+func (d *DB) IsCategoryDisabled(guildID, category string) bool {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM guild_disabled_commands WHERE guild_id = ? AND category = ?`,
+		guildID, category).Scan(&count)
+	if err != nil {
+		return false
+	}
+	return count > 0
+}
+
+// DisableCommand disables a specific command for a guild
+func (d *DB) DisableCommand(guildID, commandName string) error {
+	_, err := d.Exec(`INSERT OR IGNORE INTO guild_disabled_commands (guild_id, command_name) VALUES (?, ?)`,
+		guildID, commandName)
+	return err
+}
+
+// EnableCommand enables a previously disabled command for a guild
+func (d *DB) EnableCommand(guildID, commandName string) error {
+	_, err := d.Exec(`DELETE FROM guild_disabled_commands WHERE guild_id = ? AND command_name = ?`,
+		guildID, commandName)
+	return err
+}
+
+// DisableCategory disables an entire category for a guild
+func (d *DB) DisableCategory(guildID, category string) error {
+	_, err := d.Exec(`INSERT OR IGNORE INTO guild_disabled_commands (guild_id, category) VALUES (?, ?)`,
+		guildID, category)
+	return err
+}
+
+// EnableCategory enables a previously disabled category for a guild
+func (d *DB) EnableCategory(guildID, category string) error {
+	_, err := d.Exec(`DELETE FROM guild_disabled_commands WHERE guild_id = ? AND category = ?`,
+		guildID, category)
+	return err
+}
+
+// GetDisabledCommands returns all disabled command names for a guild
+func (d *DB) GetDisabledCommands(guildID string) ([]string, error) {
+	rows, err := d.Query(`SELECT command_name FROM guild_disabled_commands WHERE guild_id = ? AND command_name IS NOT NULL`,
+		guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var commands []string
+	for rows.Next() {
+		var cmd string
+		if err := rows.Scan(&cmd); err != nil {
+			return nil, err
+		}
+		commands = append(commands, cmd)
+	}
+	return commands, rows.Err()
+}
+
+// GetDisabledCategories returns all disabled category names for a guild
+func (d *DB) GetDisabledCategories(guildID string) ([]string, error) {
+	rows, err := d.Query(`SELECT category FROM guild_disabled_commands WHERE guild_id = ? AND category IS NOT NULL`,
+		guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var cat string
+		if err := rows.Scan(&cat); err != nil {
+			return nil, err
+		}
+		categories = append(categories, cat)
+	}
+	return categories, rows.Err()
+}
+
+// SetDisabledCommands replaces all disabled commands for a guild
+func (d *DB) SetDisabledCommands(guildID string, commands []string) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Delete all existing disabled commands (not categories)
+	_, err = tx.Exec(`DELETE FROM guild_disabled_commands WHERE guild_id = ? AND command_name IS NOT NULL`, guildID)
+	if err != nil {
+		return err
+	}
+
+	// Insert new disabled commands
+	for _, cmd := range commands {
+		_, err = tx.Exec(`INSERT INTO guild_disabled_commands (guild_id, command_name) VALUES (?, ?)`, guildID, cmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// SetDisabledCategories replaces all disabled categories for a guild
+func (d *DB) SetDisabledCategories(guildID string, categories []string) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Delete all existing disabled categories (not commands)
+	_, err = tx.Exec(`DELETE FROM guild_disabled_commands WHERE guild_id = ? AND category IS NOT NULL`, guildID)
+	if err != nil {
+		return err
+	}
+
+	// Insert new disabled categories
+	for _, cat := range categories {
+		_, err = tx.Exec(`INSERT INTO guild_disabled_commands (guild_id, category) VALUES (?, ?)`, guildID, cat)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }

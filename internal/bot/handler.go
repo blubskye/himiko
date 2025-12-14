@@ -208,6 +208,20 @@ func (ch *CommandHandler) HandleSlashCommand(s *discordgo.Session, i *discordgo.
 	}
 
 	if exists && cmd.Handler != nil {
+		// Check if command is disabled for this guild
+		if i.GuildID != "" {
+			// Check category-level disable first
+			if ch.bot.DB.IsCategoryDisabled(i.GuildID, cmd.Category) {
+				respondEphemeral(s, i, "This command category is disabled on this server.")
+				return
+			}
+			// Check individual command disable
+			if ch.bot.DB.IsCommandDisabled(i.GuildID, cmd.Name) {
+				respondEphemeral(s, i, "This command is disabled on this server.")
+				return
+			}
+		}
+
 		// Log command usage
 		guildID := ""
 		if i.GuildID != "" {

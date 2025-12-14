@@ -200,6 +200,16 @@ func (b *Bot) handlePrefixCommand(s *discordgo.Session, m *discordgo.MessageCrea
 		return
 	}
 
+	// Check if command is disabled for this guild (silently ignore)
+	if m.GuildID != "" {
+		if b.DB.IsCategoryDisabled(m.GuildID, cmd.Category) {
+			return
+		}
+		if b.DB.IsCommandDisabled(m.GuildID, cmd.Name) {
+			return
+		}
+	}
+
 	// Create a fake interaction for the handler
 	// We'll use a wrapper that responds via message instead of interaction
 	b.executePrefixCommand(s, m, cmd, args, prefix)

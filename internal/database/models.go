@@ -350,3 +350,12 @@ type MusicHistory struct {
 	URL      string
 	PlayedAt time.Time
 }
+
+// Disabled Commands/Categories - for per-guild command enable/disable
+type DisabledCommand struct {
+	ID          int64
+	GuildID     string
+	CommandName *string // nil for category disable
+	Category    *string // nil for individual command disable
+	CreatedAt   time.Time
+}
