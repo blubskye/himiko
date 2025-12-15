@@ -558,7 +558,7 @@ func (d *DB) GetCommandHistory(guildID string, limit int) ([]CommandHistory, err
 	}
 	defer rows.Close()
 
-	var history []CommandHistory
+	history := make([]CommandHistory, 0, limit)
 	for rows.Next() {
 		var ch CommandHistory
 		if err := rows.Scan(&ch.ID, &ch.GuildID, &ch.ChannelID, &ch.UserID, &ch.Command, &ch.Args, &ch.ExecutedAt); err != nil {
@@ -620,7 +620,7 @@ func (d *DB) GetDeletedMessages(channelID string, limit int) ([]DeletedMessage, 
 	}
 	defer rows.Close()
 
-	var messages []DeletedMessage
+	messages := make([]DeletedMessage, 0, limit)
 	for rows.Next() {
 		var dm DeletedMessage
 		if err := rows.Scan(&dm.ID, &dm.GuildID, &dm.ChannelID, &dm.UserID, &dm.Content, &dm.DeletedAt); err != nil {
@@ -859,7 +859,7 @@ func (d *DB) GetGuildLeaderboard(guildID string, limit int) ([]UserXP, error) {
 	}
 	defer rows.Close()
 
-	var leaderboard []UserXP
+	leaderboard := make([]UserXP, 0, limit)
 	for rows.Next() {
 		var ux UserXP
 		if err := rows.Scan(&ux.GuildID, &ux.UserID, &ux.XP, &ux.Level, &ux.UpdatedAt); err != nil {
@@ -1667,7 +1667,7 @@ func (d *DB) GetUserAliases(userID string, limit int) ([]UserAlias, error) {
 	}
 	defer rows.Close()
 
-	var aliases []UserAlias
+	aliases := make([]UserAlias, 0, limit)
 	for rows.Next() {
 		var a UserAlias
 		if err := rows.Scan(&a.ID, &a.UserID, &a.Alias, &a.AliasType, &a.FirstSeen, &a.LastSeen, &a.UseCount); err != nil {
@@ -1686,7 +1686,7 @@ func (d *DB) SearchUserByAlias(alias string) ([]string, error) {
 	}
 	defer rows.Close()
 
-	var userIDs []string
+	userIDs := make([]string, 0, 10)
 	for rows.Next() {
 		var userID string
 		if err := rows.Scan(&userID); err != nil {
@@ -1740,7 +1740,7 @@ func (d *DB) GetNewestMembers(guildID string, limit int) ([]UserActivity, error)
 	}
 	defer rows.Close()
 
-	var activities []UserActivity
+	activities := make([]UserActivity, 0, limit)
 	for rows.Next() {
 		var ua UserActivity
 		if err := rows.Scan(&ua.GuildID, &ua.UserID, &ua.FirstSeen, &ua.FirstMessage, &ua.LastSeen, &ua.MessageCount); err != nil {
@@ -1916,7 +1916,7 @@ func (d *DB) GetMusicHistory(guildID string, limit int) ([]MusicHistory, error) 
 	}
 	defer rows.Close()
 
-	var items []MusicHistory
+	items := make([]MusicHistory, 0, limit)
 	for rows.Next() {
 		var item MusicHistory
 		if err := rows.Scan(&item.ID, &item.GuildID, &item.UserID, &item.Title, &item.URL, &item.PlayedAt); err != nil {

@@ -18,6 +18,7 @@ package bot
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/blubskye/himiko/internal/database"
@@ -194,8 +195,8 @@ func (ch *CommandHandler) xpHandler(s *discordgo.Session, i *discordgo.Interacti
 			URL: user.AvatarURL("128"),
 		},
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Level", Value: fmt.Sprintf("%d", xpData.Level), Inline: true},
-			{Name: "XP", Value: fmt.Sprintf("%d", xpData.XP), Inline: true},
+			{Name: "Level", Value: strconv.Itoa(xpData.Level), Inline: true},
+			{Name: "XP", Value: strconv.FormatInt(xpData.XP, 10), Inline: true},
 			{Name: "Rank", Value: fmt.Sprintf("#%d", rank), Inline: true},
 			{Name: "Progress to Next Level", Value: fmt.Sprintf("%s\n%d / %d XP (%.1f%%)", progressBar, progress, needed, progressPercent), Inline: false},
 		},
@@ -205,10 +206,7 @@ func (ch *CommandHandler) xpHandler(s *discordgo.Session, i *discordgo.Interacti
 }
 
 func (ch *CommandHandler) leaderboardHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	page := int(getIntOption(i, "page"))
-	if page < 1 {
-		page = 1
-	}
+	page := max(int(getIntOption(i, "page")), 1)
 
 	perPage := 10
 	offset := (page - 1) * perPage
@@ -225,21 +223,14 @@ func (ch *CommandHandler) leaderboardHandler(s *discordgo.Session, i *discordgo.
 	}
 
 	totalPages := (len(leaderboard) + perPage - 1) / perPage
-	if page > totalPages {
-		page = totalPages
-	}
+	page = min(page, totalPages)
 
 	start := offset
 	end := offset + perPage
 	if start >= len(leaderboard) {
-		start = len(leaderboard) - perPage
-		if start < 0 {
-			start = 0
-		}
+		start = max(len(leaderboard)-perPage, 0)
 	}
-	if end > len(leaderboard) {
-		end = len(leaderboard)
-	}
+	end = min(end, len(leaderboard))
 
 	var description strings.Builder
 	for idx, entry := range leaderboard[start:end] {
@@ -291,8 +282,8 @@ func (ch *CommandHandler) rankHandler(s *discordgo.Session, i *discordgo.Interac
 		},
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Rank", Value: fmt.Sprintf("#%d", rank), Inline: true},
-			{Name: "Level", Value: fmt.Sprintf("%d", xpData.Level), Inline: true},
-			{Name: "Total XP", Value: fmt.Sprintf("%d", xpData.XP), Inline: true},
+			{Name: "Level", Value: strconv.Itoa(xpData.Level), Inline: true},
+			{Name: "Total XP", Value: strconv.FormatInt(xpData.XP, 10), Inline: true},
 		},
 	}
 

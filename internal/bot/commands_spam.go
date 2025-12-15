@@ -18,6 +18,7 @@ package bot
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -142,9 +143,9 @@ func (ch *CommandHandler) spamFilterStatusHandler(s *discordgo.Session, i *disco
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Status", Value: status, Inline: true},
 			{Name: "Action", Value: actionLabel, Inline: true},
-			{Name: "Max Mentions", Value: fmt.Sprintf("%d", config.MaxMentions), Inline: true},
-			{Name: "Max Links", Value: fmt.Sprintf("%d", config.MaxLinks), Inline: true},
-			{Name: "Max Emojis", Value: fmt.Sprintf("%d", config.MaxEmojis), Inline: true},
+			{Name: "Max Mentions", Value: strconv.Itoa(config.MaxMentions), Inline: true},
+			{Name: "Max Links", Value: strconv.Itoa(config.MaxLinks), Inline: true},
+			{Name: "Max Emojis", Value: strconv.Itoa(config.MaxEmojis), Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Use /spamfilter set to modify these settings",

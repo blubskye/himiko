@@ -19,6 +19,7 @@ package bot
 import (
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -329,7 +330,7 @@ func (ch *CommandHandler) userInfoHandler(s *discordgo.Session, i *discordgo.Int
 			if activity.MessageCount > 0 {
 				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 					Name:   "Messages",
-					Value:  fmt.Sprintf("%d", activity.MessageCount),
+					Value:  strconv.Itoa(activity.MessageCount),
 					Inline: true,
 				})
 			}
@@ -391,9 +392,9 @@ func (ch *CommandHandler) serverInfoHandler(s *discordgo.Session, i *discordgo.I
 			{Name: "ID", Value: guild.ID, Inline: true},
 			{Name: "Owner", Value: ownerStr, Inline: true},
 			{Name: "Created", Value: fmt.Sprintf("<t:%d:F>", createdAt.Unix()), Inline: true},
-			{Name: "Members", Value: fmt.Sprintf("%d", guild.MemberCount), Inline: true},
-			{Name: "Roles", Value: fmt.Sprintf("%d", len(guild.Roles)), Inline: true},
-			{Name: "Emojis", Value: fmt.Sprintf("%d", len(guild.Emojis)), Inline: true},
+			{Name: "Members", Value: strconv.Itoa(guild.MemberCount), Inline: true},
+			{Name: "Roles", Value: strconv.Itoa(len(guild.Roles)), Inline: true},
+			{Name: "Emojis", Value: strconv.Itoa(len(guild.Emojis)), Inline: true},
 			{Name: "Channels", Value: fmt.Sprintf("Text: %d\nVoice: %d\nCategories: %d", textChannels, voiceChannels, categories), Inline: true},
 			{Name: "Verification", Value: verificationLevels[guild.VerificationLevel], Inline: true},
 			{Name: "Boost Level", Value: fmt.Sprintf("Level %d (%d boosts)", guild.PremiumTier, guild.PremiumSubscriptionCount), Inline: true},
@@ -497,8 +498,8 @@ func (ch *CommandHandler) roleInfoHandler(s *discordgo.Session, i *discordgo.Int
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: role.ID, Inline: true},
 			{Name: "Color", Value: fmt.Sprintf("#%06X", role.Color), Inline: true},
-			{Name: "Position", Value: fmt.Sprintf("%d", role.Position), Inline: true},
-			{Name: "Members", Value: fmt.Sprintf("%d", memberCount), Inline: true},
+			{Name: "Position", Value: strconv.Itoa(role.Position), Inline: true},
+			{Name: "Members", Value: strconv.Itoa(memberCount), Inline: true},
 			{Name: "Mentionable", Value: fmt.Sprintf("%t", role.Mentionable), Inline: true},
 			{Name: "Hoisted", Value: fmt.Sprintf("%t", role.Hoist), Inline: true},
 			{Name: "Created", Value: fmt.Sprintf("<t:%d:F>", createdAt.Unix()), Inline: false},
@@ -571,8 +572,8 @@ func (ch *CommandHandler) botInfoHandler(s *discordgo.Session, i *discordgo.Inte
 		},
 		Color: 0xFF69B4,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Servers", Value: fmt.Sprintf("%d", guilds), Inline: true},
-			{Name: "Commands", Value: fmt.Sprintf("%d", len(ch.commands)), Inline: true},
+			{Name: "Servers", Value: strconv.Itoa(guilds), Inline: true},
+			{Name: "Commands", Value: strconv.Itoa(len(ch.commands)), Inline: true},
 			{Name: "Uptime", Value: formatDuration(time.Since(botStartTime)), Inline: true},
 			{Name: "Library", Value: "discordgo", Inline: true},
 			{Name: "Go Version", Value: "1.21+", Inline: true},
@@ -612,10 +613,10 @@ func (ch *CommandHandler) statsHandler(s *discordgo.Session, i *discordgo.Intera
 		},
 		Color: 0xFF69B4,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Servers", Value: fmt.Sprintf("%d", guilds), Inline: true},
-			{Name: "Users", Value: fmt.Sprintf("%d", totalMembers), Inline: true},
-			{Name: "Channels", Value: fmt.Sprintf("%d", totalChannels), Inline: true},
-			{Name: "Commands", Value: fmt.Sprintf("%d", commandCount), Inline: true},
+			{Name: "Servers", Value: strconv.Itoa(guilds), Inline: true},
+			{Name: "Users", Value: strconv.Itoa(totalMembers), Inline: true},
+			{Name: "Channels", Value: strconv.Itoa(totalChannels), Inline: true},
+			{Name: "Commands", Value: strconv.Itoa(commandCount), Inline: true},
 			{Name: "Uptime", Value: formatDuration(time.Since(botStartTime)), Inline: true},
 			{Name: "Memory", Value: fmt.Sprintf("%.2f MB", memUsed), Inline: true},
 			{Name: "Version", Value: "v" + updater.GetCurrentVersion(), Inline: true},
@@ -711,13 +712,13 @@ func (ch *CommandHandler) memberCountHandler(s *discordgo.Session, i *discordgo.
 		Title: guild.Name + " Member Count",
 		Color: 0x5865F2,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Total Members", Value: fmt.Sprintf("%d", guild.MemberCount), Inline: true},
+			{Name: "Total Members", Value: strconv.Itoa(guild.MemberCount), Inline: true},
 		},
 	}
 
 	if guild.ApproximatePresenceCount > 0 {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name: "Online", Value: fmt.Sprintf("%d", guild.ApproximatePresenceCount), Inline: true,
+			Name: "Online", Value: strconv.Itoa(guild.ApproximatePresenceCount), Inline: true,
 		})
 	}
 

@@ -18,6 +18,7 @@ package bot
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -92,7 +93,7 @@ func (ch *CommandHandler) webserverOnHandler(s *discordgo.Session, i *discordgo.
 			},
 			{
 				Name:   "Port",
-				Value:  fmt.Sprintf("%d", ch.bot.Config.WebServer.Port),
+				Value:  strconv.Itoa(ch.bot.Config.WebServer.Port),
 				Inline: true,
 			},
 		},
@@ -218,7 +219,7 @@ func (ch *CommandHandler) webserverConfigHandler(s *discordgo.Session, i *discor
 			Fields: []*discordgo.MessageEmbedField{
 				{
 					Name:   "Port",
-					Value:  fmt.Sprintf("%d", ch.bot.Config.WebServer.Port),
+					Value:  strconv.Itoa(ch.bot.Config.WebServer.Port),
 					Inline: true,
 				},
 				{
@@ -279,7 +280,7 @@ func (ch *CommandHandler) webserverOnPrefix(ctx *PrefixContext) {
 			},
 			{
 				Name:   "Port",
-				Value:  fmt.Sprintf("%d", ch.bot.Config.WebServer.Port),
+				Value:  strconv.Itoa(ch.bot.Config.WebServer.Port),
 				Inline: true,
 			},
 		},
@@ -408,7 +409,7 @@ func (ch *CommandHandler) webserverConfigPrefix(ctx *PrefixContext) {
 			Fields: []*discordgo.MessageEmbedField{
 				{
 					Name:   "Port",
-					Value:  fmt.Sprintf("%d", ch.bot.Config.WebServer.Port),
+					Value:  strconv.Itoa(ch.bot.Config.WebServer.Port),
 					Inline: true,
 				},
 				{

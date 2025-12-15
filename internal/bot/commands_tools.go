@@ -19,6 +19,7 @@ package bot
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -257,9 +258,9 @@ func (ch *CommandHandler) charCountHandler(s *discordgo.Session, i *discordgo.In
 		Title: "Character Count",
 		Color: 0x5865F2,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Characters", Value: fmt.Sprintf("%d", chars), Inline: true},
-			{Name: "Words", Value: fmt.Sprintf("%d", words), Inline: true},
-			{Name: "Lines", Value: fmt.Sprintf("%d", lines), Inline: true},
+			{Name: "Characters", Value: strconv.Itoa(chars), Inline: true},
+			{Name: "Words", Value: strconv.Itoa(words), Inline: true},
+			{Name: "Lines", Value: strconv.Itoa(lines), Inline: true},
 		},
 	}
 
@@ -282,7 +283,7 @@ func (ch *CommandHandler) snowflakeHandler(s *discordgo.Session, i *discordgo.In
 			{Name: "ID", Value: id, Inline: true},
 			{Name: "Created", Value: fmt.Sprintf("<t:%d:F>", timestamp.Unix()), Inline: true},
 			{Name: "Relative", Value: fmt.Sprintf("<t:%d:R>", timestamp.Unix()), Inline: true},
-			{Name: "Unix Timestamp", Value: fmt.Sprintf("%d", timestamp.Unix()), Inline: true},
+			{Name: "Unix Timestamp", Value: strconv.FormatInt(timestamp.Unix(), 10), Inline: true},
 		},
 	}
 

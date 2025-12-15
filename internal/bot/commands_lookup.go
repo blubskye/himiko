@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -562,9 +563,9 @@ func (ch *CommandHandler) githubHandler(s *discordgo.Session, i *discordgo.Inter
 		Thumbnail:   &discordgo.MessageEmbedThumbnail{URL: data.AvatarURL},
 		Color:       0x333333,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Repositories", Value: fmt.Sprintf("%d", data.PublicRepos), Inline: true},
-			{Name: "Followers", Value: fmt.Sprintf("%d", data.Followers), Inline: true},
-			{Name: "Following", Value: fmt.Sprintf("%d", data.Following), Inline: true},
+			{Name: "Repositories", Value: strconv.Itoa(data.PublicRepos), Inline: true},
+			{Name: "Followers", Value: strconv.Itoa(data.Followers), Inline: true},
+			{Name: "Following", Value: strconv.Itoa(data.Following), Inline: true},
 		},
 	}
 
@@ -653,7 +654,7 @@ func (ch *CommandHandler) colorHandler(s *discordgo.Session, i *discordgo.Intera
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Hex", Value: fmt.Sprintf("#%s", strings.ToUpper(hexStr)), Inline: true},
 			{Name: "RGB", Value: fmt.Sprintf("rgb(%d, %d, %d)", r, g, b), Inline: true},
-			{Name: "Integer", Value: fmt.Sprintf("%d", color), Inline: true},
+			{Name: "Integer", Value: strconv.FormatInt(color, 10), Inline: true},
 		},
 		Thumbnail: &discordgo.MessageEmbedThumbnail{
 			URL: fmt.Sprintf("https://singlecolorimage.com/get/%s/100x100", hexStr),

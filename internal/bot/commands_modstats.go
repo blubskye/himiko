@@ -18,6 +18,7 @@ package bot
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -282,10 +283,10 @@ func (ch *CommandHandler) scanBanList(s *discordgo.Session, i *discordgo.Interac
 		Title: "Ban List Scan Complete",
 		Color: 0x00FF00,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Total Processed", Value: fmt.Sprintf("%d", len(bans)), Inline: true},
-			{Name: "Imported", Value: fmt.Sprintf("%d", imported), Inline: true},
-			{Name: "Skipped (existing)", Value: fmt.Sprintf("%d", skipped), Inline: true},
-			{Name: "With Moderator Info", Value: fmt.Sprintf("%d", len(auditBanMap)), Inline: true},
+			{Name: "Total Processed", Value: strconv.Itoa(len(bans)), Inline: true},
+			{Name: "Imported", Value: strconv.Itoa(imported), Inline: true},
+			{Name: "Skipped (existing)", Value: strconv.Itoa(skipped), Inline: true},
+			{Name: "With Moderator Info", Value: strconv.Itoa(len(auditBanMap)), Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Use /modstats to view moderator statistics",
@@ -397,8 +398,8 @@ func (ch *CommandHandler) scanAuditLogs(s *discordgo.Session, i *discordgo.Inter
 		Title: "Audit Log Scan Complete",
 		Color: 0x00FF00,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Imported", Value: fmt.Sprintf("%d", imported), Inline: true},
-			{Name: "Skipped (duplicates)", Value: fmt.Sprintf("%d", skipped), Inline: true},
+			{Name: "Imported", Value: strconv.Itoa(imported), Inline: true},
+			{Name: "Skipped (duplicates)", Value: strconv.Itoa(skipped), Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Note: Audit logs only go back ~45 days. Use /scanbans bans for full ban list.",

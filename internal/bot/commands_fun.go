@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -355,7 +356,7 @@ func (ch *CommandHandler) diceHandler(s *discordgo.Session, i *discordgo.Interac
 	for j := int64(0); j < count; j++ {
 		roll := rand.Int63n(sides) + 1
 		total += roll
-		results = append(results, fmt.Sprintf("%d", roll))
+		results = append(results, strconv.FormatInt(roll, 10))
 	}
 
 	desc := strings.Join(results, ", ")

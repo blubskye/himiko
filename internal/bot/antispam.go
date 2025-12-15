@@ -34,16 +34,22 @@ type UserPressure struct {
 	LastUpdate  time.Time
 }
 
+// pressureKey is a composite key for the pressure map to avoid string allocation
+type pressureKey struct {
+	guildID string
+	userID  string
+}
+
 // SpamTracker manages spam pressure for all users
 type SpamTracker struct {
 	mu       sync.RWMutex
-	pressure map[string]*UserPressure // key: guildID:userID
+	pressure map[pressureKey]*UserPressure
 }
 
 // NewSpamTracker creates a new spam tracker
 func NewSpamTracker() *SpamTracker {
 	return &SpamTracker{
-		pressure: make(map[string]*UserPressure),
+		pressure: make(map[pressureKey]*UserPressure),
 	}
 }
 
@@ -58,7 +64,7 @@ func (st *SpamTracker) GetPressure(guildID, userID string, msg *discordgo.Messag
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	key := guildID + ":" + userID
+	key := pressureKey{guildID: guildID, userID: userID}
 	up, exists := st.pressure[key]
 	if !exists {
 		up = &UserPressure{}
@@ -69,10 +75,7 @@ func (st *SpamTracker) GetPressure(guildID, userID string, msg *discordgo.Messag
 	if !up.LastUpdate.IsZero() {
 		elapsed := time.Since(up.LastUpdate).Seconds()
 		decay := cfg.BasePressure * (elapsed / cfg.PressureDecay)
-		up.Pressure -= decay
-		if up.Pressure < 0 {
-			up.Pressure = 0
-		}
+		up.Pressure = max(up.Pressure-decay, 0)
 	}
 
 	// Calculate new pressure
@@ -116,7 +119,7 @@ func (st *SpamTracker) ResetPressure(guildID, userID string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	key := guildID + ":" + userID
+	key := pressureKey{guildID: guildID, userID: userID}
 	delete(st.pressure, key)
 }
 

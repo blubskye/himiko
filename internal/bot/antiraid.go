@@ -18,6 +18,7 @@ package bot
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,14 +122,14 @@ func (b *Bot) HandleRaidDetected(s *discordgo.Session, guildID string, cfg *data
 		sinceTime := time.Now().Add(-time.Duration(cfg.RaidTime) * time.Second).UnixMilli()
 		joins, _ := b.DB.GetRecentJoins(guildID, sinceTime)
 
-		var userList string
+		var userList strings.Builder
 		for i, join := range joins {
 			if i >= 10 {
-				userList += fmt.Sprintf("\n... and %d more", len(joins)-10)
+				fmt.Fprintf(&userList, "\n... and %d more", len(joins)-10)
 				break
 			}
 			accountAge := time.Since(time.UnixMilli(join.AccountCreatedAt))
-			userList += fmt.Sprintf("<@%s> (Account: %s)\n", join.UserID, formatDuration(accountAge))
+			fmt.Fprintf(&userList, "<@%s> (Account: %s)\n", join.UserID, formatDuration(accountAge))
 		}
 
 		alertText := ""
@@ -141,7 +142,7 @@ func (b *Bot) HandleRaidDetected(s *discordgo.Session, guildID string, cfg *data
 			Description: fmt.Sprintf("%d users joined in the past %d seconds!", joinCount, cfg.RaidTime),
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Recent Joins", Value: userList, Inline: false},
+				{Name: "Recent Joins", Value: userList.String(), Inline: false},
 				{Name: "Action", Value: cfg.Action, Inline: true},
 				{Name: "Auto-Silence", Value: autoSilenceModeLabel(cfg.AutoSilence), Inline: true},
 			},
