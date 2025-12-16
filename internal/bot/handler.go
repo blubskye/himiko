@@ -235,6 +235,11 @@ func (ch *CommandHandler) HandleSlashCommand(s *discordgo.Session, i *discordgo.
 
 		ch.bot.DB.LogCommand(guildID, i.ChannelID, i.Member.User.ID, cmdName, strings.TrimSpace(args))
 
+		// Increment command counter for stats
+		if ch.bot.WebServer != nil {
+			ch.bot.WebServer.IncrementCommand()
+		}
+
 		cmd.Handler(s, i)
 	} else {
 		respond(s, i, "Unknown command")

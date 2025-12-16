@@ -35,12 +35,13 @@ import (
 
 // Server represents the web server for the dashboard
 type Server struct {
-	config     *config.Config
-	db         *database.DB
-	session    *discordgo.Session
-	httpServer *http.Server
-	running    bool
-	mu         sync.RWMutex
+	config         *config.Config
+	db             *database.DB
+	session        *discordgo.Session
+	httpServer     *http.Server
+	statsCollector *StatsCollector
+	running        bool
+	mu             sync.RWMutex
 }
 
 // New creates a new web server instance
@@ -50,6 +51,34 @@ func New(cfg *config.Config, db *database.DB, session *discordgo.Session) *Serve
 		db:      db,
 		session: session,
 	}
+}
+
+// InitStats initializes the stats collector with the bot start time
+func (s *Server) InitStats(startTime time.Time, version string) {
+	dbPath := ""
+	if s.db != nil {
+		dbPath = s.db.GetPath()
+	}
+	s.statsCollector = NewStatsCollector(s.session, s.db, dbPath, startTime, version)
+}
+
+// IncrementMessage increments the message counter for stats
+func (s *Server) IncrementMessage() {
+	if s.statsCollector != nil {
+		s.statsCollector.IncrementMessage()
+	}
+}
+
+// IncrementCommand increments the command counter for stats
+func (s *Server) IncrementCommand() {
+	if s.statsCollector != nil {
+		s.statsCollector.IncrementCommand()
+	}
+}
+
+// GetStatsCollector returns the stats collector
+func (s *Server) GetStatsCollector() *StatsCollector {
+	return s.statsCollector
 }
 
 // Start starts the web server
@@ -98,6 +127,13 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/channels/", s.handleAPIChannels)
 	mux.HandleFunc("/api/roles/", s.handleAPIRoles)
 
+	// Real-time stats endpoints
+	mux.HandleFunc("/api/stats/realtime", s.handleAPIStatsRealtime)
+	mux.HandleFunc("/api/stats/snapshot", s.handleAPIStatsSnapshot)
+	mux.HandleFunc("/api/stats/history/hour", s.handleAPIStatsHourly)
+	mux.HandleFunc("/api/stats/history/day", s.handleAPIStatsDaily)
+	mux.HandleFunc("/api/stats/database", s.handleAPIStatsDatabase)
+
 	addr := fmt.Sprintf("%s:%d", s.config.WebServer.Host, s.config.WebServer.Port)
 
 	s.httpServer = &http.Server{
@@ -109,6 +145,11 @@ func (s *Server) Start() error {
 	}
 
 	s.running = true
+
+	// Start stats collector if initialized
+	if s.statsCollector != nil {
+		s.statsCollector.Start()
+	}
 
 	go func() {
 		log.Printf("[WebServer] Starting on http://%s", addr)
@@ -127,6 +168,11 @@ func (s *Server) Stop() error {
 
 	if !s.running {
 		return nil
+	}
+
+	// Stop stats collector
+	if s.statsCollector != nil {
+		s.statsCollector.Stop()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -758,6 +804,114 @@ func (s *Server) handleAPIRoles(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, roles)
 }
 
+// handleAPIStatsRealtime provides Server-Sent Events for real-time stats
+func (s *Server) handleAPIStatsRealtime(w http.ResponseWriter, r *http.Request) {
+	if s.statsCollector == nil {
+		http.Error(w, "Stats collector not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Create client channel
+	clientChan := make(chan []byte, 10)
+	s.statsCollector.RegisterClient(clientChan)
+	defer s.statsCollector.UnregisterClient(clientChan)
+
+	// Get flusher for SSE
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Send initial snapshot
+	if snapshot := s.statsCollector.GetCurrentSnapshot(); snapshot != nil {
+		data, _ := json.Marshal(snapshot)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	// Stream updates
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case data := <-clientChan:
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+}
+
+// handleAPIStatsSnapshot returns current stats snapshot
+func (s *Server) handleAPIStatsSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.statsCollector == nil {
+		http.Error(w, "Stats collector not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	stats := s.statsCollector.GetRealTimeStats()
+	s.jsonResponse(w, stats)
+}
+
+// handleAPIStatsHourly returns hourly history (5-sec intervals)
+func (s *Server) handleAPIStatsHourly(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.statsCollector == nil {
+		http.Error(w, "Stats collector not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	history := s.statsCollector.GetHourlyHistory()
+	s.jsonResponse(w, history)
+}
+
+// handleAPIStatsDaily returns daily history (1-min intervals)
+func (s *Server) handleAPIStatsDaily(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.statsCollector == nil {
+		http.Error(w, "Stats collector not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	history := s.statsCollector.GetDailyHistory()
+	s.jsonResponse(w, history)
+}
+
+// handleAPIStatsDatabase returns database statistics
+func (s *Server) handleAPIStatsDatabase(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.statsCollector == nil {
+		http.Error(w, "Stats collector not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	dbStats := s.statsCollector.GetDatabaseStats()
+	s.jsonResponse(w, dbStats)
+}
+
 // jsonResponse sends a JSON response
 func (s *Server) jsonResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -968,6 +1122,85 @@ const dashboardHTML = `<!DOCTYPE html>
         @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         footer { text-align: center; padding: 30px; color: var(--text-secondary); font-size: 14px; }
         footer a { color: var(--accent); text-decoration: none; }
+        /* Stats page styles */
+        .main-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .main-tab {
+            padding: 12px 24px;
+            background: var(--bg-secondary);
+            border: none;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 15px;
+            transition: all 0.2s;
+        }
+        .main-tab:hover { background: var(--bg-card); color: var(--text-primary); }
+        .main-tab.active { background: var(--accent); color: white; }
+        .main-content { display: none; }
+        .main-content.active { display: block; }
+        .live-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .live-stat-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid transparent;
+            transition: all 0.3s;
+        }
+        .live-stat-card:hover { border-color: var(--accent); }
+        .live-stat-card h4 { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px; }
+        .live-stat-card .live-value { font-size: 28px; font-weight: bold; color: var(--accent); transition: color 0.3s; }
+        .live-stat-card .live-value.updated { color: var(--success); }
+        .live-stat-card .unit { font-size: 14px; color: var(--text-secondary); margin-left: 4px; }
+        .charts-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 25px; }
+        .chart-container {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .chart-container h4 { margin-bottom: 15px; color: var(--text-primary); }
+        .chart-wrapper { height: 250px; position: relative; }
+        .db-stats {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .db-stats h4 { margin-bottom: 15px; }
+        .db-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .db-stat-item {
+            background: var(--bg-card);
+            padding: 12px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .db-stat-item span:first-child { color: var(--text-secondary); font-size: 13px; }
+        .db-stat-item span:last-child { color: var(--text-primary); font-weight: 600; }
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border-radius: 20px;
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+        .connection-dot.disconnected { background: var(--accent); animation: none; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     </style>
 </head>
 <body>
@@ -977,15 +1210,49 @@ const dashboardHTML = `<!DOCTYPE html>
         </div>
     </header>
     <main class="container">
-        <div class="stats-grid">
-            <div class="stat-card"><h3>Servers</h3><div class="value" id="guild-count">-</div></div>
-            <div class="stat-card"><h3>Total Members</h3><div class="value" id="member-count">-</div></div>
-            <div class="stat-card"><h3>Version</h3><div class="value" id="version">-</div></div>
+        <div class="main-tabs">
+            <button class="main-tab active" onclick="switchMainTab('servers')">Servers</button>
+            <button class="main-tab" onclick="switchMainTab('stats')">Live Stats</button>
         </div>
-        <section class="guilds-section">
-            <h2>Managed Servers</h2>
-            <div id="guild-list" class="guild-list"><div class="loading">Loading servers...</div></div>
-        </section>
+        <div id="servers-content" class="main-content active">
+            <div class="stats-grid">
+                <div class="stat-card"><h3>Servers</h3><div class="value" id="guild-count">-</div></div>
+                <div class="stat-card"><h3>Total Members</h3><div class="value" id="member-count">-</div></div>
+                <div class="stat-card"><h3>Version</h3><div class="value" id="version">-</div></div>
+            </div>
+            <section class="guilds-section">
+                <h2>Managed Servers</h2>
+                <div id="guild-list" class="guild-list"><div class="loading">Loading servers...</div></div>
+            </section>
+        </div>
+        <div id="stats-content" class="main-content">
+            <div class="connection-status">
+                <div class="connection-dot" id="sse-dot"></div>
+                <span id="sse-status">Connecting...</span>
+            </div>
+            <div class="live-stats-grid">
+                <div class="live-stat-card"><h4>Memory Alloc</h4><div class="live-value" id="stat-mem-alloc">-</div></div>
+                <div class="live-stat-card"><h4>Memory Sys</h4><div class="live-value" id="stat-mem-sys">-</div></div>
+                <div class="live-stat-card"><h4>Goroutines</h4><div class="live-value" id="stat-goroutines">-</div></div>
+                <div class="live-stat-card"><h4>GC Runs</h4><div class="live-value" id="stat-gc">-</div></div>
+                <div class="live-stat-card"><h4>Guilds</h4><div class="live-value" id="stat-guilds">-</div></div>
+                <div class="live-stat-card"><h4>Members</h4><div class="live-value" id="stat-members">-</div></div>
+                <div class="live-stat-card"><h4>Latency</h4><div class="live-value" id="stat-latency">-</div></div>
+                <div class="live-stat-card"><h4>Uptime</h4><div class="live-value" id="stat-uptime">-</div></div>
+                <div class="live-stat-card"><h4>Commands</h4><div class="live-value" id="stat-commands">-</div></div>
+                <div class="live-stat-card"><h4>Messages</h4><div class="live-value" id="stat-messages">-</div></div>
+                <div class="live-stat-card"><h4>Cmds/min</h4><div class="live-value" id="stat-cmds-rate">-</div></div>
+                <div class="live-stat-card"><h4>Msgs/min</h4><div class="live-value" id="stat-msgs-rate">-</div></div>
+            </div>
+            <div class="charts-row">
+                <div class="chart-container"><h4>Memory Usage (Last Hour)</h4><div class="chart-wrapper"><canvas id="memory-chart"></canvas></div></div>
+                <div class="chart-container"><h4>Activity (Last Hour)</h4><div class="chart-wrapper"><canvas id="activity-chart"></canvas></div></div>
+            </div>
+            <div class="db-stats">
+                <h4>Database Statistics</h4>
+                <div class="db-stats-grid" id="db-stats-grid"><div class="loading">Loading...</div></div>
+            </div>
+        </div>
     </main>
     <div id="guild-modal" class="modal">
         <div class="modal-content">
@@ -1583,6 +1850,247 @@ const dashboardHTML = `<!DOCTYPE html>
         document.getElementById('guild-modal').addEventListener('click', (e) => {
             if (e.target.id === 'guild-modal') closeModal();
         });
+
+        // Stats Tab functionality
+        let statsEventSource = null;
+        let memoryChart = null;
+        let activityChart = null;
+        let chartDataPoints = [];
+        let startTime = null;
+        let chartJsLoaded = false;
+
+        function switchMainTab(tab) {
+            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.main-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(` + "`" + `.main-tab[onclick="switchMainTab('${tab}')"]` + "`" + `).classList.add('active');
+            document.getElementById(tab + '-content').classList.add('active');
+
+            if (tab === 'stats') {
+                initStatsTab();
+            } else {
+                if (statsEventSource) {
+                    statsEventSource.close();
+                    statsEventSource = null;
+                }
+            }
+        }
+
+        async function initStatsTab() {
+            if (!chartJsLoaded) {
+                await loadChartJs();
+            }
+            connectSSE();
+            fetchDbStats();
+            fetchHistoryForCharts();
+        }
+
+        function loadChartJs() {
+            return new Promise((resolve) => {
+                if (window.Chart) { chartJsLoaded = true; resolve(); return; }
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+                script.onload = () => { chartJsLoaded = true; resolve(); };
+                document.head.appendChild(script);
+            });
+        }
+
+        function connectSSE() {
+            if (statsEventSource) return;
+
+            statsEventSource = new EventSource('/api/stats/realtime');
+
+            statsEventSource.onopen = () => {
+                document.getElementById('sse-dot').classList.remove('disconnected');
+                document.getElementById('sse-status').textContent = 'Connected';
+            };
+
+            statsEventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateLiveStats(data);
+                addChartDataPoint(data);
+            };
+
+            statsEventSource.onerror = () => {
+                document.getElementById('sse-dot').classList.add('disconnected');
+                document.getElementById('sse-status').textContent = 'Reconnecting...';
+                statsEventSource.close();
+                statsEventSource = null;
+                setTimeout(connectSSE, 3000);
+            };
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+            return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+
+        function formatUptime(seconds) {
+            const d = Math.floor(seconds / 86400);
+            const h = Math.floor((seconds % 86400) / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+            if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+            return m + 'm ' + s + 's';
+        }
+
+        function updateLiveStats(data) {
+            const updates = {
+                'stat-mem-alloc': formatBytes(data.mem_alloc),
+                'stat-mem-sys': formatBytes(data.mem_sys),
+                'stat-goroutines': data.goroutines,
+                'stat-gc': data.mem_num_gc,
+                'stat-guilds': data.guild_count,
+                'stat-members': data.member_count.toLocaleString(),
+                'stat-latency': data.heartbeat_latency_ms + 'ms',
+                'stat-commands': data.commands_total.toLocaleString(),
+                'stat-messages': data.messages_total.toLocaleString(),
+                'stat-cmds-rate': data.commands_per_min.toFixed(1),
+                'stat-msgs-rate': data.messages_per_min.toFixed(1)
+            };
+
+            for (const [id, value] of Object.entries(updates)) {
+                const el = document.getElementById(id);
+                if (el && el.textContent !== String(value)) {
+                    el.textContent = value;
+                    el.classList.add('updated');
+                    setTimeout(() => el.classList.remove('updated'), 500);
+                }
+            }
+        }
+
+        function updateUptime() {
+            if (startTime) {
+                const seconds = Math.floor((Date.now() - startTime) / 1000);
+                document.getElementById('stat-uptime').textContent = formatUptime(seconds);
+            }
+        }
+
+        async function fetchHistoryForCharts() {
+            try {
+                const [hourRes, snapshotRes] = await Promise.all([
+                    fetch('/api/stats/history/hour'),
+                    fetch('/api/stats/snapshot')
+                ]);
+                const history = await hourRes.json();
+                const snapshot = await snapshotRes.json();
+
+                if (snapshot.start_time) {
+                    startTime = new Date(snapshot.start_time).getTime();
+                    updateUptime();
+                    setInterval(updateUptime, 1000);
+                }
+
+                if (history && history.length > 0) {
+                    chartDataPoints = history.slice(-60);
+                    initCharts();
+                }
+            } catch (err) { console.error('Failed to fetch history:', err); }
+        }
+
+        function addChartDataPoint(data) {
+            chartDataPoints.push(data);
+            if (chartDataPoints.length > 60) chartDataPoints.shift();
+            updateCharts();
+        }
+
+        function initCharts() {
+            if (!window.Chart) return;
+
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: true, labels: { color: '#a0a0a0' } } },
+                scales: {
+                    x: { display: false },
+                    y: { ticks: { color: '#a0a0a0' }, grid: { color: '#2a2a4e' } }
+                }
+            };
+
+            const memCtx = document.getElementById('memory-chart').getContext('2d');
+            memoryChart = new Chart(memCtx, {
+                type: 'line',
+                data: {
+                    labels: chartDataPoints.map((_, i) => i),
+                    datasets: [{
+                        label: 'Alloc',
+                        data: chartDataPoints.map(d => d.mem_alloc / 1048576),
+                        borderColor: '#e94560',
+                        backgroundColor: 'rgba(233, 69, 96, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }, {
+                        label: 'Sys',
+                        data: chartDataPoints.map(d => d.mem_sys / 1048576),
+                        borderColor: '#5865F2',
+                        backgroundColor: 'rgba(88, 101, 242, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, title: { display: true, text: 'MB', color: '#a0a0a0' } } } }
+            });
+
+            const actCtx = document.getElementById('activity-chart').getContext('2d');
+            activityChart = new Chart(actCtx, {
+                type: 'line',
+                data: {
+                    labels: chartDataPoints.map((_, i) => i),
+                    datasets: [{
+                        label: 'Cmds/min',
+                        data: chartDataPoints.map(d => d.commands_per_min),
+                        borderColor: '#57F287',
+                        backgroundColor: 'rgba(87, 242, 135, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }, {
+                        label: 'Msgs/min',
+                        data: chartDataPoints.map(d => d.messages_per_min),
+                        borderColor: '#FEE75C',
+                        backgroundColor: 'rgba(254, 231, 92, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: chartOptions
+            });
+        }
+
+        function updateCharts() {
+            if (!memoryChart || !activityChart) return;
+
+            memoryChart.data.labels = chartDataPoints.map((_, i) => i);
+            memoryChart.data.datasets[0].data = chartDataPoints.map(d => d.mem_alloc / 1048576);
+            memoryChart.data.datasets[1].data = chartDataPoints.map(d => d.mem_sys / 1048576);
+            memoryChart.update('none');
+
+            activityChart.data.labels = chartDataPoints.map((_, i) => i);
+            activityChart.data.datasets[0].data = chartDataPoints.map(d => d.commands_per_min);
+            activityChart.data.datasets[1].data = chartDataPoints.map(d => d.messages_per_min);
+            activityChart.update('none');
+        }
+
+        async function fetchDbStats() {
+            try {
+                const res = await fetch('/api/stats/database');
+                const data = await res.json();
+                const container = document.getElementById('db-stats-grid');
+
+                let html = ` + "`" + `<div class="db-stat-item"><span>Database Size</span><span>${formatBytes(data.file_size_bytes)}</span></div>` + "`" + `;
+
+                if (data.table_counts) {
+                    for (const [table, count] of Object.entries(data.table_counts)) {
+                        html += ` + "`" + `<div class="db-stat-item"><span>${table.replace(/_/g, ' ')}</span><span>${count.toLocaleString()}</span></div>` + "`" + `;
+                    }
+                }
+
+                container.innerHTML = html;
+            } catch (err) {
+                document.getElementById('db-stats-grid').innerHTML = '<p style="color:var(--text-secondary)">Failed to load database stats</p>';
+            }
+        }
 
         fetchStatus();
         fetchStats();

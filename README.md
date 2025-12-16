@@ -201,6 +201,17 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - **NGINX Ready:** Designed to work behind NGINX reverse proxy
 - **Local by Default:** Binds to 127.0.0.1 for security, configurable for remote access
 
+### 📈 Live Stats & Monitoring
+- **Real-Time Dashboard:** View live metrics with auto-updating values
+- **Memory Monitoring:** Track Alloc, Sys memory, and GC runs
+- **Discord Stats:** Guilds, members, channels, heartbeat latency
+- **Activity Metrics:** Commands processed, messages seen, rates per minute
+- **Interactive Charts:** Memory and activity graphs (last hour)
+- **Database Stats:** File size and table row counts
+- **SSE Updates:** Server-Sent Events for instant 5-second updates
+- **Uptime Counter:** Live uptime display
+- **Discord Command:** `botstats` for quick stats in Discord (Owner only)
+
 ### 🐛 Debug Mode
 - **Full Stack Traces:** Enable verbose logging with complete stack traces
 - **Error Details:** Get detailed error information for troubleshooting
@@ -339,7 +350,7 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | **AI** | ask |
 | **Music** | play, skip, stop, pause, resume, queue, nowplaying, remove, clear, movetop, volume, join, leave, musicrole, folders, files, local, search, musicfolder, musichistory |
 | **Update** | update (check/apply/version) |
-| **WebServer** | webserver (on/off/status/config) |
+| **WebServer** | webserver (on/off/status/config), botstats |
 | **Misc** | help, command, tag, notify, history, about, invite, source |
 
 ---

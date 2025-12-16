@@ -18,7 +18,9 @@ package bot
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -31,6 +33,16 @@ func (ch *CommandHandler) registerWebServerCommands() {
 		PrefixOnly:  true, // Owner-only command, no need for slash command
 		PrefixHandler: func(ctx *PrefixContext) {
 			ch.webserverPrefixHandler(ctx)
+		},
+	})
+
+	ch.Register(&Command{
+		Name:        "botstats",
+		Description: "View real-time bot statistics (Owner only)",
+		Category:    "Admin",
+		PrefixOnly:  true, // Owner-only command
+		PrefixHandler: func(ctx *PrefixContext) {
+			ch.botstatsHandler(ctx)
 		},
 	})
 }
@@ -430,4 +442,157 @@ func (ch *CommandHandler) webserverConfigPrefix(ctx *PrefixContext) {
 	} else {
 		ctx.Reply("Usage: `" + ctx.Prefix + "webserver config port <number>` or `" + ctx.Prefix + "webserver config allow_remote <true|false>`")
 	}
+}
+
+// botstatsHandler shows real-time bot statistics
+func (ch *CommandHandler) botstatsHandler(ctx *PrefixContext) {
+	// Owner only
+	if !ch.bot.Config.IsOwner(ctx.Author.ID) {
+		ctx.Reply("This command is only available to bot owners.")
+		return
+	}
+
+	// Get memory stats
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	// Calculate uptime
+	uptime := time.Since(BotStartTime)
+	uptimeStr := formatDuration(uptime)
+
+	// Get Discord stats
+	guildCount := 0
+	memberCount := 0
+	channelCount := 0
+
+	if ctx.Session.State != nil {
+		ctx.Session.State.RLock()
+		guilds := ctx.Session.State.Guilds
+		guildCount = len(guilds)
+		for _, g := range guilds {
+			memberCount += g.MemberCount
+			channelCount += len(g.Channels)
+		}
+		ctx.Session.State.RUnlock()
+	}
+
+	// Get heartbeat latency
+	latency := ctx.Session.HeartbeatLatency().Milliseconds()
+
+	// Get stats from collector if available
+	var cmdTotal, msgTotal int64
+	var cmdRate, msgRate float64
+	if sc := ch.bot.WebServer.GetStatsCollector(); sc != nil {
+		if snapshot := sc.GetCurrentSnapshot(); snapshot != nil {
+			cmdTotal = snapshot.CommandsTotal
+			msgTotal = snapshot.MessagesTotal
+			cmdRate = snapshot.CommandsPerMin
+			msgRate = snapshot.MessagesPerMin
+		}
+	}
+
+	// Build embed
+	embed := &discordgo.MessageEmbed{
+		Title: "Bot Statistics",
+		Color: 0xFF69B4,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Uptime",
+				Value:  uptimeStr,
+				Inline: true,
+			},
+			{
+				Name:   "Latency",
+				Value:  fmt.Sprintf("%dms", latency),
+				Inline: true,
+			},
+			{
+				Name:   "Goroutines",
+				Value:  fmt.Sprintf("%d", runtime.NumGoroutine()),
+				Inline: true,
+			},
+			{
+				Name:   "Memory (Alloc)",
+				Value:  formatBytesU64(memStats.Alloc),
+				Inline: true,
+			},
+			{
+				Name:   "Memory (Sys)",
+				Value:  formatBytesU64(memStats.Sys),
+				Inline: true,
+			},
+			{
+				Name:   "GC Runs",
+				Value:  fmt.Sprintf("%d", memStats.NumGC),
+				Inline: true,
+			},
+			{
+				Name:   "Guilds",
+				Value:  fmt.Sprintf("%d", guildCount),
+				Inline: true,
+			},
+			{
+				Name:   "Members",
+				Value:  formatNumberInt(memberCount),
+				Inline: true,
+			},
+			{
+				Name:   "Channels",
+				Value:  formatNumberInt(channelCount),
+				Inline: true,
+			},
+			{
+				Name:   "Commands Processed",
+				Value:  formatNumberInt(int(cmdTotal)),
+				Inline: true,
+			},
+			{
+				Name:   "Messages Seen",
+				Value:  formatNumberInt(int(msgTotal)),
+				Inline: true,
+			},
+			{
+				Name:   "Activity/min",
+				Value:  fmt.Sprintf("%.1f cmds, %.1f msgs", cmdRate, msgRate),
+				Inline: true,
+			},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Use the web dashboard for real-time charts and more details",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	ctx.ReplyEmbed(embed)
+}
+
+// formatBytesU64 formats bytes (uint64) into a human-readable string
+func formatBytesU64(bytes uint64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+
+	switch {
+	case bytes >= GB:
+		return fmt.Sprintf("%.2f GB", float64(bytes)/GB)
+	case bytes >= MB:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/MB)
+	case bytes >= KB:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/KB)
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
+// formatNumberInt formats a number with comma separators
+func formatNumberInt(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	if n < 1000000 {
+		return fmt.Sprintf("%d,%03d", n/1000, n%1000)
+	}
+	return fmt.Sprintf("%d,%03d,%03d", n/1000000, (n/1000)%1000, n%1000)
 }

@@ -23,9 +23,13 @@ import (
 
 	"github.com/blubskye/himiko/internal/config"
 	"github.com/blubskye/himiko/internal/database"
+	"github.com/blubskye/himiko/internal/updater"
 	"github.com/blubskye/himiko/internal/webserver"
 	"github.com/bwmarrin/discordgo"
 )
+
+// BotStartTime is the time the bot was started (exported for stats)
+var BotStartTime = time.Now()
 
 type Bot struct {
 	Session      *discordgo.Session
@@ -84,6 +88,9 @@ func (b *Bot) Start() error {
 		log.Printf("Warning: Failed to register some commands: %v", err)
 	}
 
+	// Initialize stats collector
+	b.WebServer.InitStats(BotStartTime, updater.GetCurrentVersion())
+
 	// Start background tasks
 	go b.runScheduledTasks()
 
@@ -137,6 +144,11 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	// Ignore bot messages
 	if m.Author.Bot {
 		return
+	}
+
+	// Increment message counter for stats
+	if b.WebServer != nil {
+		b.WebServer.IncrementMessage()
 	}
 
 	// Track user activity and aliases

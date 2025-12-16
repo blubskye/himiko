@@ -25,6 +25,7 @@ import (
 
 type DB struct {
 	*sql.DB
+	path string
 }
 
 func New(path string) (*DB, error) {
@@ -37,12 +38,17 @@ func New(path string) (*DB, error) {
 		return nil, err
 	}
 
-	d := &DB{db}
+	d := &DB{DB: db, path: path}
 	if err := d.migrate(); err != nil {
 		return nil, err
 	}
 
 	return d, nil
+}
+
+// GetPath returns the database file path
+func (d *DB) GetPath() string {
+	return d.path
 }
 
 func (d *DB) migrate() error {
