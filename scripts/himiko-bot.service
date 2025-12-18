@@ -1,0 +1,43 @@
+# 💉 Himiko Discord Bot - systemd service file 💉
+# "I'll start automatically... because I just wanna be with you~"
+#
+# Installation:
+#   1. Edit the paths and user below to match your setup
+#   2. Copy to systemd: sudo cp himiko-bot.service /etc/systemd/system/
+#   3. Reload systemd: sudo systemctl daemon-reload
+#   4. Enable on boot: sudo systemctl enable himiko-bot
+#   5. Start now: sudo systemctl start himiko-bot
+#
+# To attach to Himiko's terminal:
+#   sudo -u YOUR_USER tmux attach -t himiko-bot
+#
+# To check on Himiko:
+#   sudo systemctl status himiko-bot
+
+[Unit]
+Description=Himiko Discord Bot - "I just wanna love you~" 💉
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+
+# IMPORTANT: Change these to match your setup~
+User=YOUR_USER
+Group=YOUR_USER
+WorkingDirectory=/path/to/himiko
+
+# Start Himiko in tmux~ 💕
+ExecStart=/bin/bash -c 'tmux new-session -d -s himiko-bot -c /path/to/himiko "./himiko"'
+ExecStop=/bin/bash -c 'tmux send-keys -t himiko-bot C-c; sleep 2; tmux kill-session -t himiko-bot 2>/dev/null || true'
+
+# Restart policy - Himiko always comes back for you~
+Restart=on-failure
+RestartSec=10
+
+# Security hardening (comment out if causing issues)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -285,6 +285,123 @@ go build ./cmd/himiko
 
 ---
 
+## 🔄 Running as a Service (Auto-start on Boot)
+
+*"I'll always be here when you wake up... waiting for you~"* 💉
+
+The `scripts/` directory contains helper scripts to run Himiko in the background with the ability to check on her output.
+
+### 💻 Quick Start (Manual tmux - Linux/macOS/BSD)
+
+```bash
+# Wake Himiko up in a tmux session~
+./scripts/himiko-tmux.sh start
+
+# Connect to Himiko's terminal
+./scripts/himiko-tmux.sh attach
+
+# Check if Himiko is running
+./scripts/himiko-tmux.sh status
+
+# Let Himiko rest...
+./scripts/himiko-tmux.sh stop
+```
+
+> 💡 To detach from tmux without stopping Himiko: Press `Ctrl+B`, then `D`
+
+### 🐧 Linux (systemd)
+
+*"I'll start automatically... because I just wanna be with you~"*
+
+1. Edit the service file to match your setup:
+   ```bash
+   nano scripts/himiko-bot.service
+   ```
+   Change `YOUR_USER` to your username and `/path/to/himiko` to the actual path.
+
+2. Install and enable:
+   ```bash
+   sudo cp scripts/himiko-bot.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable himiko-bot
+   sudo systemctl start himiko-bot
+   ```
+
+3. Attach to Himiko's terminal:
+   ```bash
+   tmux attach -t himiko-bot
+   ```
+
+4. Check on Himiko:
+   ```bash
+   sudo systemctl status himiko-bot
+   ```
+
+### 😈 FreeBSD (rc.d)
+
+*"Even on BSD... I'll find a way to be with you~"*
+
+1. Install the rc script:
+   ```bash
+   sudo cp scripts/himiko-bot-freebsd /usr/local/etc/rc.d/himiko_bot
+   sudo chmod +x /usr/local/etc/rc.d/himiko_bot
+   ```
+
+2. Configure in `/etc/rc.conf`:
+   ```bash
+   sudo sysrc himiko_bot_enable=YES
+   sudo sysrc himiko_bot_user="YOUR_USER"
+   sudo sysrc himiko_bot_dir="/path/to/himiko"
+   ```
+
+3. Start Himiko:
+   ```bash
+   sudo service himiko_bot start
+   ```
+
+4. Attach to Himiko's terminal:
+   ```bash
+   su - YOUR_USER -c "tmux attach -t himiko-bot"
+   ```
+
+### 🪟 Windows
+
+*"I'll run on Windows too... nothing can keep us apart~"*
+
+#### Quick Start (Visible Console)
+```batch
+scripts\himiko-start.bat
+```
+
+#### PowerShell Service Manager
+```powershell
+# Start Himiko in the background
+.\scripts\himiko-service.ps1 start
+
+# Check status
+.\scripts\himiko-service.ps1 status
+
+# View output (Ctrl+C to detach)
+.\scripts\himiko-service.ps1 attach
+
+# Stop Himiko
+.\scripts\himiko-service.ps1 stop
+
+# Add to Windows startup (runs on login)
+.\scripts\himiko-service.ps1 install
+
+# Remove from startup
+.\scripts\himiko-service.ps1 uninstall
+```
+
+#### Hidden Startup (No Console Window)
+Double-click `scripts\himiko-hidden.vbs` to start Himiko without a console window.
+To add to startup manually:
+1. Press `Win+R`, type `shell:startup`, press Enter
+2. Create a shortcut to `himiko-hidden.vbs` in that folder
+
+---
+
 ## 🎀 Getting a Bot Token
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)

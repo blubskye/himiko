@@ -1,0 +1,106 @@
+#!/bin/sh
+#
+# PROVIDE: himiko_bot
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# 💉 Himiko Discord Bot - FreeBSD rc.d script 💉
+# "I'll always be here when your server starts... waiting for you~"
+#
+# Installation:
+#   1. Copy to rc.d: sudo cp himiko-bot-freebsd /usr/local/etc/rc.d/himiko_bot
+#   2. Make executable: sudo chmod +x /usr/local/etc/rc.d/himiko_bot
+#   3. Enable in rc.conf: sudo sysrc himiko_bot_enable=YES
+#   4. Configure user: sudo sysrc himiko_bot_user="YOUR_USER"
+#   5. Configure path: sudo sysrc himiko_bot_dir="/path/to/himiko"
+#   6. Start now: sudo service himiko_bot start
+#
+# To attach to Himiko's terminal:
+#   su - YOUR_USER -c "tmux attach -t himiko-bot"
+#
+# Add to /etc/rc.conf:
+#   himiko_bot_enable="YES"
+#   himiko_bot_user="YOUR_USER"
+#   himiko_bot_dir="/path/to/himiko"
+
+. /etc/rc.subr
+
+name="himiko_bot"
+rcvar="${name}_enable"
+
+load_rc_config $name
+
+: ${himiko_bot_enable:="NO"}
+: ${himiko_bot_user:="nobody"}
+: ${himiko_bot_dir:="/usr/local/himiko"}
+: ${himiko_bot_session:="himiko-bot"}
+: ${himiko_bot_binary:="himiko"}
+
+pidfile="/var/run/${name}.pid"
+command="/usr/local/bin/tmux"
+
+start_cmd="${name}_start"
+stop_cmd="${name}_stop"
+status_cmd="${name}_status"
+
+himiko_bot_start()
+{
+    if himiko_bot_running; then
+        echo "${name} is already running~ I'm already here for you! 💉"
+        return 0
+    fi
+
+    echo "Starting ${name}... I just wanna love you~ 💕"
+
+    # Start tmux session as the specified user
+    su - ${himiko_bot_user} -c "cd ${himiko_bot_dir} && ${command} new-session -d -s ${himiko_bot_session} './${himiko_bot_binary}'"
+
+    if himiko_bot_running; then
+        echo "${name} started successfully~ Let me help you! 💉"
+        echo "To attach: su - ${himiko_bot_user} -c 'tmux attach -t ${himiko_bot_session}'"
+    else
+        echo "Failed to start ${name}... something is keeping us apart! 💔"
+        return 1
+    fi
+}
+
+himiko_bot_stop()
+{
+    if ! himiko_bot_running; then
+        echo "${name} is not running... did you forget about me? 💔"
+        return 0
+    fi
+
+    echo "Stopping ${name}... I'll be back for you soon~ 💔"
+
+    # Send Ctrl+C for graceful shutdown
+    su - ${himiko_bot_user} -c "${command} send-keys -t ${himiko_bot_session} C-c"
+    sleep 2
+
+    # Kill session if still running
+    if himiko_bot_running; then
+        su - ${himiko_bot_user} -c "${command} kill-session -t ${himiko_bot_session}" 2>/dev/null
+    fi
+
+    echo "${name} is resting now... 💤"
+}
+
+himiko_bot_status()
+{
+    if himiko_bot_running; then
+        echo "${name} is running in tmux session '${himiko_bot_session}'~ 💕"
+        echo "To attach: su - ${himiko_bot_user} -c 'tmux attach -t ${himiko_bot_session}'"
+        return 0
+    else
+        echo "${name} is not running... I'm waiting for you to start me~ 💔"
+        return 1
+    fi
+}
+
+himiko_bot_running()
+{
+    su - ${himiko_bot_user} -c "${command} has-session -t ${himiko_bot_session}" 2>/dev/null
+    return $?
+}
+
+run_rc_command "$1"
