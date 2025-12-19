@@ -218,6 +218,12 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - **Memory Stats:** View memory and goroutine statistics
 - **Caller Info:** Track exactly where errors originate
 
+### 🔐 Field-Level Encryption
+- **AES-256-GCM:** Industry-standard authenticated encryption for sensitive data
+- **Automatic Migration:** Seamlessly encrypts existing data when enabled
+- **Selective Encryption:** Only encrypts sensitive fields (messages, reasons, etc.)
+- **Backwards Compatible:** Works with legacy unencrypted data
+
 ### 🚫 Bot Management (Owner Only)
 - Bot-level bans for users/servers
 - DM forwarding to designated channels
@@ -273,6 +279,10 @@ Copy `config.example.json` to `config.json` and fill in your details:
     "host": "127.0.0.1",
     "secret_key": "",
     "allow_remote": false
+  },
+  "encryption": {
+    "enabled": false,
+    "key": ""
   }
 }
 ```
@@ -423,6 +433,61 @@ Use the `/invite` command once she's running, or construct the URL:
 ```
 https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&scope=bot%20applications.commands
 ```
+
+---
+
+## 🔐 Field-Level Encryption
+
+*"I'll keep your secrets safe... because I love you~"* 💉
+
+Himiko supports optional field-level encryption for sensitive database fields. This protects data like:
+- Welcome messages and join DM content
+- Warning reasons
+- Deleted message content (snipe)
+- AFK messages, reminders, scheduled messages
+- Custom command responses and tags
+- Mod action reasons
+- Bot ban reasons
+- Mention responses
+
+### Enabling Encryption
+
+1. Add an encryption key to your `config.json`:
+```json
+{
+  "encryption": {
+    "enabled": true,
+    "key": "your-strong-passphrase-here"
+  }
+}
+```
+
+2. Restart Himiko. On first startup with encryption enabled, she'll automatically migrate existing data.
+
+**Important Notes:**
+- Use a **strong passphrase** (at least 16 characters recommended)
+- **Back up your database** before enabling encryption
+- **Keep your key safe** - if lost, encrypted data cannot be recovered
+- The key is used to derive an AES-256 encryption key via PBKDF2
+
+### How It Works
+
+- **AES-256-GCM:** Industry-standard authenticated encryption
+- **PBKDF2 Key Derivation:** 100,000 iterations for key stretching
+- **Automatic Migration:** Existing data is encrypted on first startup
+- **Backwards Compatible:** Can read legacy unencrypted data seamlessly
+- **Selective:** Only sensitive text fields are encrypted, not IDs or metadata
+
+### VeraCrypt Alternative
+
+If you prefer whole-database encryption, you can store your `himiko.db` on a VeraCrypt encrypted volume:
+
+1. Create a VeraCrypt encrypted container
+2. Mount it before starting Himiko
+3. Set `database_path` to point to the mounted volume (e.g., `/mnt/encrypted/himiko.db`)
+4. Unmount when not in use
+
+This provides full-disk encryption but requires manual mounting.
 
 ---
 

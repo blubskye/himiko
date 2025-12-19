@@ -36,12 +36,29 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Initialize database
-	db, err := database.New(cfg.DatabasePath)
+	// Initialize database with optional encryption
+	var encryptionKey string
+	if cfg.Encryption.Enabled {
+		if cfg.Encryption.Key == "" {
+			log.Fatalf("Encryption is enabled but no encryption key is set in config")
+		}
+		encryptionKey = cfg.Encryption.Key
+		log.Println("Field-level encryption is enabled")
+	}
+
+	db, err := database.NewWithEncryption(cfg.DatabasePath, encryptionKey)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
+	// Run encryption migration if encryption is enabled and data isn't migrated yet
+	if cfg.Encryption.Enabled && !db.IsDataMigrated() {
+		log.Println("Running encryption migration for existing data...")
+		if err := db.MigrateToEncrypted(); err != nil {
+			log.Fatalf("Failed to migrate data to encrypted format: %v", err)
+		}
+	}
 
 	// Create and start the bot
 	b, err := bot.New(cfg, db)
