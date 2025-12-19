@@ -70,6 +70,12 @@ type Config struct {
 		SecretKey   string `json:"secret_key"`   // Secret key for session encryption
 		AllowRemote bool   `json:"allow_remote"` // Allow connections from non-localhost (for NGINX proxy)
 	} `json:"webserver"`
+
+	// Field-level encryption for sensitive database data
+	Encryption struct {
+		Enabled bool   `json:"enabled"` // Enable/disable field encryption
+		Key     string `json:"key"`     // Encryption passphrase (required if enabled)
+	} `json:"encryption"`
 }
 
 func Load(path string) (*Config, error) {

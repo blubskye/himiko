@@ -18,17 +18,29 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
+
+	"github.com/blubskye/himiko/internal/crypto"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type DB struct {
 	*sql.DB
-	path string
+	path      string
+	encryptor *crypto.FieldEncryptor
 }
 
+// New creates a new database connection without encryption.
+// Use NewWithEncryption to enable field-level encryption.
 func New(path string) (*DB, error) {
+	return NewWithEncryption(path, "")
+}
+
+// NewWithEncryption creates a new database connection with optional field-level encryption.
+// If encryptionKey is empty, encryption is disabled.
+func NewWithEncryption(path string, encryptionKey string) (*DB, error) {
 	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on")
 	if err != nil {
 		return nil, err
@@ -38,7 +50,12 @@ func New(path string) (*DB, error) {
 		return nil, err
 	}
 
-	d := &DB{DB: db, path: path}
+	encryptor, err := crypto.NewFieldEncryptor(encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create encryptor: %w", err)
+	}
+
+	d := &DB{DB: db, path: path, encryptor: encryptor}
 	if err := d.migrate(); err != nil {
 		return nil, err
 	}
@@ -49,6 +66,40 @@ func New(path string) (*DB, error) {
 // GetPath returns the database file path
 func (d *DB) GetPath() string {
 	return d.path
+}
+
+// IsEncryptionEnabled returns whether field-level encryption is enabled
+func (d *DB) IsEncryptionEnabled() bool {
+	return d.encryptor.IsEnabled()
+}
+
+// Encrypt encrypts a string if encryption is enabled
+func (d *DB) Encrypt(plaintext string) string {
+	result, _ := d.encryptor.Encrypt(plaintext)
+	return result
+}
+
+// Decrypt decrypts a string if encryption is enabled
+func (d *DB) Decrypt(ciphertext string) string {
+	result, _ := d.encryptor.Decrypt(ciphertext)
+	return result
+}
+
+// EncryptNullable encrypts a nullable string
+func (d *DB) EncryptNullable(plaintext *string) *string {
+	result, _ := d.encryptor.EncryptNullable(plaintext)
+	return result
+}
+
+// DecryptNullable decrypts a nullable string
+func (d *DB) DecryptNullable(ciphertext *string) *string {
+	result, _ := d.encryptor.DecryptNullable(ciphertext)
+	return result
+}
+
+// IsDataEncrypted checks if a field value appears to be encrypted
+func (d *DB) IsDataEncrypted(data string) bool {
+	return d.encryptor.IsEncrypted(data)
 }
 
 func (d *DB) migrate() error {
@@ -454,6 +505,13 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_music_queue_guild ON music_queue(guild_id, position);
 	CREATE INDEX IF NOT EXISTS idx_music_history_guild ON music_history(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_disabled_commands_guild ON guild_disabled_commands(guild_id);
+
+	-- Encryption metadata (tracks if data has been migrated to encrypted)
+	CREATE TABLE IF NOT EXISTS encryption_metadata (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 
 	_, err := d.Exec(schema)
@@ -474,6 +532,442 @@ func (d *DB) migrate() error {
 	return nil
 }
 
+// IsDataMigrated checks if data has been migrated to encrypted format
+func (d *DB) IsDataMigrated() bool {
+	var value string
+	err := d.QueryRow(`SELECT value FROM encryption_metadata WHERE key = 'encrypted'`).Scan(&value)
+	return err == nil && value == "true"
+}
+
+// SetDataMigrated marks that data has been migrated to encrypted format
+func (d *DB) SetDataMigrated(migrated bool) error {
+	val := "false"
+	if migrated {
+		val = "true"
+	}
+	_, err := d.Exec(`INSERT OR REPLACE INTO encryption_metadata (key, value, updated_at) VALUES ('encrypted', ?, CURRENT_TIMESTAMP)`, val)
+	return err
+}
+
+// MigrateToEncrypted encrypts all sensitive fields in the database.
+// This is a one-time migration when encryption is first enabled.
+// It's safe to call multiple times - already encrypted data is skipped.
+func (d *DB) MigrateToEncrypted() error {
+	if !d.IsEncryptionEnabled() {
+		return fmt.Errorf("encryption is not enabled")
+	}
+
+	if d.IsDataMigrated() {
+		return nil // Already migrated
+	}
+
+	fmt.Println("[Database] Starting encryption migration...")
+
+	// Migrate guild_settings (welcome_message, join_dm_title, join_dm_message)
+	if err := d.migrateEncryptGuildSettings(); err != nil {
+		return fmt.Errorf("failed to migrate guild_settings: %w", err)
+	}
+
+	// Migrate warnings (reason)
+	if err := d.migrateEncryptWarnings(); err != nil {
+		return fmt.Errorf("failed to migrate warnings: %w", err)
+	}
+
+	// Migrate deleted_messages (content)
+	if err := d.migrateEncryptDeletedMessages(); err != nil {
+		return fmt.Errorf("failed to migrate deleted_messages: %w", err)
+	}
+
+	// Migrate user_notes (note)
+	if err := d.migrateEncryptUserNotes(); err != nil {
+		return fmt.Errorf("failed to migrate user_notes: %w", err)
+	}
+
+	// Migrate scheduled_messages (message)
+	if err := d.migrateEncryptScheduledMessages(); err != nil {
+		return fmt.Errorf("failed to migrate scheduled_messages: %w", err)
+	}
+
+	// Migrate afk_status (message)
+	if err := d.migrateEncryptAFKStatus(); err != nil {
+		return fmt.Errorf("failed to migrate afk_status: %w", err)
+	}
+
+	// Migrate reminders (message)
+	if err := d.migrateEncryptReminders(); err != nil {
+		return fmt.Errorf("failed to migrate reminders: %w", err)
+	}
+
+	// Migrate tags (content)
+	if err := d.migrateEncryptTags(); err != nil {
+		return fmt.Errorf("failed to migrate tags: %w", err)
+	}
+
+	// Migrate custom_commands (response)
+	if err := d.migrateEncryptCustomCommands(); err != nil {
+		return fmt.Errorf("failed to migrate custom_commands: %w", err)
+	}
+
+	// Migrate bot_bans (reason)
+	if err := d.migrateEncryptBotBans(); err != nil {
+		return fmt.Errorf("failed to migrate bot_bans: %w", err)
+	}
+
+	// Migrate mod_actions (reason)
+	if err := d.migrateEncryptModActions(); err != nil {
+		return fmt.Errorf("failed to migrate mod_actions: %w", err)
+	}
+
+	// Migrate mention_responses (trigger, response, image_url)
+	if err := d.migrateEncryptMentionResponses(); err != nil {
+		return fmt.Errorf("failed to migrate mention_responses: %w", err)
+	}
+
+	// Migrate regex_filters (reason)
+	if err := d.migrateEncryptRegexFilters(); err != nil {
+		return fmt.Errorf("failed to migrate regex_filters: %w", err)
+	}
+
+	// Mark as migrated
+	if err := d.SetDataMigrated(true); err != nil {
+		return fmt.Errorf("failed to mark migration complete: %w", err)
+	}
+
+	fmt.Println("[Database] Encryption migration complete!")
+	return nil
+}
+
+func (d *DB) migrateEncryptGuildSettings() error {
+	rows, err := d.Query(`SELECT guild_id, welcome_message, join_dm_title, join_dm_message FROM guild_settings`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var guildID string
+		var welcomeMsg, joinTitle, joinMsg *string
+		if err := rows.Scan(&guildID, &welcomeMsg, &joinTitle, &joinMsg); err != nil {
+			return err
+		}
+
+		// Only encrypt if not already encrypted
+		needsUpdate := false
+		if welcomeMsg != nil && *welcomeMsg != "" && !d.IsDataEncrypted(*welcomeMsg) {
+			*welcomeMsg = d.Encrypt(*welcomeMsg)
+			needsUpdate = true
+		}
+		if joinTitle != nil && *joinTitle != "" && !d.IsDataEncrypted(*joinTitle) {
+			*joinTitle = d.Encrypt(*joinTitle)
+			needsUpdate = true
+		}
+		if joinMsg != nil && *joinMsg != "" && !d.IsDataEncrypted(*joinMsg) {
+			*joinMsg = d.Encrypt(*joinMsg)
+			needsUpdate = true
+		}
+
+		if needsUpdate {
+			_, err = d.Exec(`UPDATE guild_settings SET welcome_message = ?, join_dm_title = ?, join_dm_message = ? WHERE guild_id = ?`,
+				welcomeMsg, joinTitle, joinMsg, guildID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptWarnings() error {
+	rows, err := d.Query(`SELECT id, reason FROM warnings WHERE reason IS NOT NULL AND reason != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var reason string
+		if err := rows.Scan(&id, &reason); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(reason) {
+			_, err = d.Exec(`UPDATE warnings SET reason = ? WHERE id = ?`, d.Encrypt(reason), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptDeletedMessages() error {
+	rows, err := d.Query(`SELECT id, content FROM deleted_messages WHERE content != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var content string
+		if err := rows.Scan(&id, &content); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(content) {
+			_, err = d.Exec(`UPDATE deleted_messages SET content = ? WHERE id = ?`, d.Encrypt(content), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptUserNotes() error {
+	rows, err := d.Query(`SELECT id, note FROM user_notes WHERE note != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var note string
+		if err := rows.Scan(&id, &note); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(note) {
+			_, err = d.Exec(`UPDATE user_notes SET note = ? WHERE id = ?`, d.Encrypt(note), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptScheduledMessages() error {
+	rows, err := d.Query(`SELECT id, message FROM scheduled_messages WHERE message != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var message string
+		if err := rows.Scan(&id, &message); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(message) {
+			_, err = d.Exec(`UPDATE scheduled_messages SET message = ? WHERE id = ?`, d.Encrypt(message), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptAFKStatus() error {
+	rows, err := d.Query(`SELECT user_id, message FROM afk_status WHERE message IS NOT NULL AND message != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var userID, message string
+		if err := rows.Scan(&userID, &message); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(message) {
+			_, err = d.Exec(`UPDATE afk_status SET message = ? WHERE user_id = ?`, d.Encrypt(message), userID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptReminders() error {
+	rows, err := d.Query(`SELECT id, message FROM reminders WHERE message != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var message string
+		if err := rows.Scan(&id, &message); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(message) {
+			_, err = d.Exec(`UPDATE reminders SET message = ? WHERE id = ?`, d.Encrypt(message), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptTags() error {
+	rows, err := d.Query(`SELECT id, content FROM tags WHERE content != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var content string
+		if err := rows.Scan(&id, &content); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(content) {
+			_, err = d.Exec(`UPDATE tags SET content = ? WHERE id = ?`, d.Encrypt(content), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptCustomCommands() error {
+	rows, err := d.Query(`SELECT id, response FROM custom_commands WHERE response != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var response string
+		if err := rows.Scan(&id, &response); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(response) {
+			_, err = d.Exec(`UPDATE custom_commands SET response = ? WHERE id = ?`, d.Encrypt(response), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptBotBans() error {
+	rows, err := d.Query(`SELECT target_id, reason FROM bot_bans WHERE reason IS NOT NULL AND reason != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var targetID, reason string
+		if err := rows.Scan(&targetID, &reason); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(reason) {
+			_, err = d.Exec(`UPDATE bot_bans SET reason = ? WHERE target_id = ?`, d.Encrypt(reason), targetID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptModActions() error {
+	rows, err := d.Query(`SELECT id, reason FROM mod_actions WHERE reason IS NOT NULL AND reason != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var reason string
+		if err := rows.Scan(&id, &reason); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(reason) {
+			_, err = d.Exec(`UPDATE mod_actions SET reason = ? WHERE id = ?`, d.Encrypt(reason), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptMentionResponses() error {
+	rows, err := d.Query(`SELECT id, trigger_text, response, image_url FROM mention_responses`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var trigger, response string
+		var imageURL *string
+		if err := rows.Scan(&id, &trigger, &response, &imageURL); err != nil {
+			return err
+		}
+
+		needsUpdate := false
+		if !d.IsDataEncrypted(trigger) {
+			trigger = d.Encrypt(trigger)
+			needsUpdate = true
+		}
+		if !d.IsDataEncrypted(response) {
+			response = d.Encrypt(response)
+			needsUpdate = true
+		}
+		if imageURL != nil && *imageURL != "" && !d.IsDataEncrypted(*imageURL) {
+			*imageURL = d.Encrypt(*imageURL)
+			needsUpdate = true
+		}
+
+		if needsUpdate {
+			_, err = d.Exec(`UPDATE mention_responses SET trigger_text = ?, response = ?, image_url = ? WHERE id = ?`,
+				trigger, response, imageURL, id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func (d *DB) migrateEncryptRegexFilters() error {
+	rows, err := d.Query(`SELECT id, reason FROM regex_filters WHERE reason IS NOT NULL AND reason != ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var reason string
+		if err := rows.Scan(&id, &reason); err != nil {
+			return err
+		}
+		if !d.IsDataEncrypted(reason) {
+			_, err = d.Exec(`UPDATE regex_filters SET reason = ? WHERE id = ?`, d.Encrypt(reason), id)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
+}
+
 // Guild Settings
 func (d *DB) GetGuildSettings(guildID string) (*GuildSettings, error) {
 	var gs GuildSettings
@@ -483,10 +977,21 @@ func (d *DB) GetGuildSettings(guildID string) (*GuildSettings, error) {
 	if err == sql.ErrNoRows {
 		return &GuildSettings{GuildID: guildID, Prefix: "/"}, nil
 	}
+	if err == nil {
+		// Decrypt sensitive fields
+		gs.WelcomeMessage = d.DecryptNullable(gs.WelcomeMessage)
+		gs.JoinDMTitle = d.DecryptNullable(gs.JoinDMTitle)
+		gs.JoinDMMessage = d.DecryptNullable(gs.JoinDMMessage)
+	}
 	return &gs, err
 }
 
 func (d *DB) SetGuildSettings(gs *GuildSettings) error {
+	// Encrypt sensitive fields
+	welcomeMsg := d.EncryptNullable(gs.WelcomeMessage)
+	joinTitle := d.EncryptNullable(gs.JoinDMTitle)
+	joinMsg := d.EncryptNullable(gs.JoinDMMessage)
+
 	_, err := d.Exec(`INSERT INTO guild_settings (guild_id, prefix, mod_log_channel, welcome_channel, welcome_message, join_dm_title, join_dm_message, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(guild_id) DO UPDATE SET
@@ -497,7 +1002,7 @@ func (d *DB) SetGuildSettings(gs *GuildSettings) error {
 		join_dm_title = excluded.join_dm_title,
 		join_dm_message = excluded.join_dm_message,
 		updated_at = CURRENT_TIMESTAMP`,
-		gs.GuildID, gs.Prefix, gs.ModLogChannel, gs.WelcomeChannel, gs.WelcomeMessage, gs.JoinDMTitle, gs.JoinDMMessage)
+		gs.GuildID, gs.Prefix, gs.ModLogChannel, gs.WelcomeChannel, welcomeMsg, joinTitle, joinMsg)
 	return err
 }
 
@@ -510,12 +1015,15 @@ func (d *DB) GetCustomCommand(guildID, name string) (*CustomCommand, error) {
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	if err == nil {
+		cc.Response = d.Decrypt(cc.Response)
+	}
 	return &cc, err
 }
 
 func (d *DB) CreateCustomCommand(guildID, name, response, createdBy string) error {
 	_, err := d.Exec(`INSERT INTO custom_commands (guild_id, name, response, created_by) VALUES (?, ?, ?, ?)`,
-		guildID, name, response, createdBy)
+		guildID, name, d.Encrypt(response), createdBy)
 	return err
 }
 
@@ -538,6 +1046,7 @@ func (d *DB) ListCustomCommands(guildID string) ([]CustomCommand, error) {
 		if err := rows.Scan(&cc.ID, &cc.GuildID, &cc.Name, &cc.Response, &cc.CreatedBy, &cc.UseCount); err != nil {
 			return nil, err
 		}
+		cc.Response = d.Decrypt(cc.Response)
 		commands = append(commands, cc)
 	}
 	return commands, rows.Err()
@@ -578,7 +1087,7 @@ func (d *DB) GetCommandHistory(guildID string, limit int) ([]CommandHistory, err
 // Warnings
 func (d *DB) AddWarning(guildID, userID, moderatorID, reason string) error {
 	_, err := d.Exec(`INSERT INTO warnings (guild_id, user_id, moderator_id, reason) VALUES (?, ?, ?, ?)`,
-		guildID, userID, moderatorID, reason)
+		guildID, userID, moderatorID, d.Encrypt(reason))
 	return err
 }
 
@@ -596,6 +1105,7 @@ func (d *DB) GetWarnings(guildID, userID string) ([]Warning, error) {
 		if err := rows.Scan(&w.ID, &w.GuildID, &w.UserID, &w.ModeratorID, &w.Reason, &w.CreatedAt); err != nil {
 			return nil, err
 		}
+		w.Reason = d.DecryptNullable(w.Reason)
 		warnings = append(warnings, w)
 	}
 	return warnings, rows.Err()
@@ -614,7 +1124,7 @@ func (d *DB) DeleteWarning(id int64) error {
 // Deleted Messages (for snipe)
 func (d *DB) LogDeletedMessage(guildID, channelID, userID, content string) error {
 	_, err := d.Exec(`INSERT INTO deleted_messages (guild_id, channel_id, user_id, content) VALUES (?, ?, ?, ?)`,
-		guildID, channelID, userID, content)
+		guildID, channelID, userID, d.Encrypt(content))
 	return err
 }
 
@@ -632,6 +1142,7 @@ func (d *DB) GetDeletedMessages(channelID string, limit int) ([]DeletedMessage, 
 		if err := rows.Scan(&dm.ID, &dm.GuildID, &dm.ChannelID, &dm.UserID, &dm.Content, &dm.DeletedAt); err != nil {
 			return nil, err
 		}
+		dm.Content = d.Decrypt(dm.Content)
 		messages = append(messages, dm)
 	}
 	return messages, rows.Err()
@@ -646,7 +1157,7 @@ func (d *DB) CleanOldDeletedMessages(olderThan time.Duration) error {
 // Scheduled Messages
 func (d *DB) ScheduleMessage(guildID, channelID, userID, message string, scheduledFor time.Time) error {
 	_, err := d.Exec(`INSERT INTO scheduled_messages (guild_id, channel_id, user_id, message, scheduled_for) VALUES (?, ?, ?, ?, ?)`,
-		guildID, channelID, userID, message, scheduledFor)
+		guildID, channelID, userID, d.Encrypt(message), scheduledFor)
 	return err
 }
 
@@ -664,6 +1175,7 @@ func (d *DB) GetPendingScheduledMessages() ([]ScheduledMessage, error) {
 		if err := rows.Scan(&sm.ID, &sm.GuildID, &sm.ChannelID, &sm.UserID, &sm.Message, &sm.ScheduledFor); err != nil {
 			return nil, err
 		}
+		sm.Message = d.Decrypt(sm.Message)
 		messages = append(messages, sm)
 	}
 	return messages, rows.Err()
@@ -678,7 +1190,7 @@ func (d *DB) MarkScheduledMessageExecuted(id int64) error {
 func (d *DB) SetAFK(userID, message string) error {
 	_, err := d.Exec(`INSERT INTO afk_status (user_id, message) VALUES (?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET message = excluded.message, set_at = CURRENT_TIMESTAMP`,
-		userID, message)
+		userID, d.Encrypt(message))
 	return err
 }
 
@@ -688,6 +1200,9 @@ func (d *DB) GetAFK(userID string) (*AFKStatus, error) {
 		&afk.UserID, &afk.Message, &afk.SetAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
+	}
+	if err == nil {
+		afk.Message = d.DecryptNullable(afk.Message)
 	}
 	return &afk, err
 }
@@ -700,7 +1215,7 @@ func (d *DB) RemoveAFK(userID string) error {
 // Reminders
 func (d *DB) AddReminder(userID, channelID, message string, remindAt time.Time) error {
 	_, err := d.Exec(`INSERT INTO reminders (user_id, channel_id, message, remind_at) VALUES (?, ?, ?, ?)`,
-		userID, channelID, message, remindAt)
+		userID, channelID, d.Encrypt(message), remindAt)
 	return err
 }
 
@@ -718,6 +1233,7 @@ func (d *DB) GetPendingReminders() ([]Reminder, error) {
 		if err := rows.Scan(&r.ID, &r.UserID, &r.ChannelID, &r.Message, &r.RemindAt); err != nil {
 			return nil, err
 		}
+		r.Message = d.Decrypt(r.Message)
 		reminders = append(reminders, r)
 	}
 	return reminders, rows.Err()
@@ -737,12 +1253,15 @@ func (d *DB) GetTag(guildID, name string) (*Tag, error) {
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	if err == nil {
+		t.Content = d.Decrypt(t.Content)
+	}
 	return &t, err
 }
 
 func (d *DB) CreateTag(guildID, name, content, createdBy string) error {
 	_, err := d.Exec(`INSERT INTO tags (guild_id, name, content, created_by) VALUES (?, ?, ?, ?)`,
-		guildID, name, content, createdBy)
+		guildID, name, d.Encrypt(content), createdBy)
 	return err
 }
 
@@ -765,6 +1284,7 @@ func (d *DB) ListTags(guildID string) ([]Tag, error) {
 		if err := rows.Scan(&t.ID, &t.GuildID, &t.Name, &t.Content, &t.CreatedBy, &t.UseCount); err != nil {
 			return nil, err
 		}
+		t.Content = d.Decrypt(t.Content)
 		tags = append(tags, t)
 	}
 	return tags, rows.Err()
@@ -908,7 +1428,7 @@ func XPForLevel(level int) int64 {
 
 func (d *DB) AddRegexFilter(guildID, pattern, action, reason, createdBy string) error {
 	_, err := d.Exec(`INSERT INTO regex_filters (guild_id, pattern, action, reason, created_by) VALUES (?, ?, ?, ?, ?)`,
-		guildID, pattern, action, reason, createdBy)
+		guildID, pattern, action, d.Encrypt(reason), createdBy)
 	return err
 }
 
@@ -931,6 +1451,7 @@ func (d *DB) GetRegexFilters(guildID string) ([]RegexFilter, error) {
 		if err := rows.Scan(&f.ID, &f.GuildID, &f.Pattern, &f.Action, &f.Reason, &f.CreatedBy, &f.CreatedAt); err != nil {
 			return nil, err
 		}
+		f.Reason = d.Decrypt(f.Reason)
 		filters = append(filters, f)
 	}
 	return filters, rows.Err()
@@ -1219,7 +1740,7 @@ func (d *DB) AddBotBan(targetID, banType, reason, bannedBy string) error {
 	_, err := d.Exec(`INSERT INTO bot_bans (target_id, ban_type, reason, banned_by)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(target_id) DO UPDATE SET ban_type = excluded.ban_type, reason = excluded.reason`,
-		targetID, banType, reason, bannedBy)
+		targetID, banType, d.Encrypt(reason), bannedBy)
 	return err
 }
 
@@ -1240,6 +1761,9 @@ func (d *DB) GetBotBan(targetID string) (*BotBan, error) {
 		targetID).Scan(&bb.ID, &bb.TargetID, &bb.BanType, &bb.Reason, &bb.BannedBy, &bb.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
+	}
+	if err == nil {
+		bb.Reason = d.Decrypt(bb.Reason)
 	}
 	return &bb, err
 }
@@ -1263,6 +1787,7 @@ func (d *DB) GetBotBans(banType string) ([]BotBan, error) {
 		if err := rows.Scan(&bb.ID, &bb.TargetID, &bb.BanType, &bb.Reason, &bb.BannedBy, &bb.CreatedAt); err != nil {
 			return nil, err
 		}
+		bb.Reason = d.Decrypt(bb.Reason)
 		bans = append(bans, bb)
 	}
 	return bans, rows.Err()
@@ -1283,8 +1808,9 @@ func sqrt(x float64) float64 {
 // ============ Moderation Actions ============
 
 func (d *DB) AddModAction(guildID, moderatorID, targetID, action string, reason *string, timestamp int64) error {
+	encReason := d.EncryptNullable(reason)
 	_, err := d.Exec(`INSERT INTO mod_actions (guild_id, moderator_id, target_id, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)`,
-		guildID, moderatorID, targetID, action, reason, timestamp)
+		guildID, moderatorID, targetID, action, encReason, timestamp)
 	return err
 }
 
@@ -1379,6 +1905,7 @@ func (d *DB) GetModActionsForTarget(guildID, targetID string) ([]ModAction, erro
 		if err := rows.Scan(&ma.ID, &ma.GuildID, &ma.ModeratorID, &ma.TargetID, &ma.Action, &ma.Reason, &ma.Timestamp, &ma.CreatedAt); err != nil {
 			return nil, err
 		}
+		ma.Reason = d.DecryptNullable(ma.Reason)
 		actions = append(actions, ma)
 	}
 	return actions, rows.Err()
@@ -1390,12 +1917,13 @@ func (d *DB) AddMentionResponse(guildID, trigger, response string, imageURL *str
 	_, err := d.Exec(`INSERT INTO mention_responses (guild_id, trigger_text, response, image_url, created_by)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(guild_id, trigger_text) DO UPDATE SET response = excluded.response, image_url = excluded.image_url`,
-		guildID, trigger, response, imageURL, createdBy)
+		guildID, d.Encrypt(trigger), d.Encrypt(response), d.EncryptNullable(imageURL), createdBy)
 	return err
 }
 
 func (d *DB) RemoveMentionResponse(guildID, trigger string) error {
-	_, err := d.Exec(`DELETE FROM mention_responses WHERE guild_id = ? AND trigger_text = ?`, guildID, trigger)
+	// Need to encrypt trigger for lookup since it's stored encrypted
+	_, err := d.Exec(`DELETE FROM mention_responses WHERE guild_id = ? AND trigger_text = ?`, guildID, d.Encrypt(trigger))
 	return err
 }
 
@@ -1413,6 +1941,9 @@ func (d *DB) GetMentionResponses(guildID string) ([]MentionResponse, error) {
 		if err := rows.Scan(&mr.ID, &mr.GuildID, &mr.TriggerText, &mr.Response, &mr.ImageURL, &mr.CreatedBy, &mr.CreatedAt); err != nil {
 			return nil, err
 		}
+		mr.TriggerText = d.Decrypt(mr.TriggerText)
+		mr.Response = d.Decrypt(mr.Response)
+		mr.ImageURL = d.DecryptNullable(mr.ImageURL)
 		responses = append(responses, mr)
 	}
 	return responses, rows.Err()
@@ -1420,11 +1951,17 @@ func (d *DB) GetMentionResponses(guildID string) ([]MentionResponse, error) {
 
 func (d *DB) GetMentionResponse(guildID, trigger string) (*MentionResponse, error) {
 	var mr MentionResponse
+	// Need to encrypt trigger for lookup since it's stored encrypted
 	err := d.QueryRow(`SELECT id, guild_id, trigger_text, response, image_url, created_by, created_at
-		FROM mention_responses WHERE guild_id = ? AND trigger_text = ?`, guildID, trigger).Scan(
+		FROM mention_responses WHERE guild_id = ? AND trigger_text = ?`, guildID, d.Encrypt(trigger)).Scan(
 		&mr.ID, &mr.GuildID, &mr.TriggerText, &mr.Response, &mr.ImageURL, &mr.CreatedBy, &mr.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
+	}
+	if err == nil {
+		mr.TriggerText = d.Decrypt(mr.TriggerText)
+		mr.Response = d.Decrypt(mr.Response)
+		mr.ImageURL = d.DecryptNullable(mr.ImageURL)
 	}
 	return &mr, err
 }
