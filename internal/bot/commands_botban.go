@@ -114,13 +114,23 @@ func (ch *CommandHandler) botBanHandler(s *discordgo.Session, i *discordgo.Inter
 	}
 
 	emoji := ":bust_in_silhouette:"
+	targetDisplay := targetID
 	if banType == "server" {
 		emoji = ":homes:"
+		// Try to fetch server name
+		if guild, err := s.Guild(targetID); err == nil && guild != nil {
+			targetDisplay = fmt.Sprintf("%s (%s)", guild.Name, targetID)
+		}
+	} else {
+		// Try to fetch user info
+		if user, err := s.User(targetID); err == nil && user != nil {
+			targetDisplay = fmt.Sprintf("%s (%s)", user.Username, targetID)
+		}
 	}
 
 	embed := &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("%s Bot Ban Added", emoji),
-		Description: fmt.Sprintf("**Type:** %s\n**ID:** `%s`\n**Reason:** %s", banType, targetID, reason),
+		Description: fmt.Sprintf("**Type:** %s\n**Target:** %s\n**Reason:** %s", banType, targetDisplay, reason),
 		Color:       0xFF0000,
 	}
 
@@ -141,8 +151,16 @@ func (ch *CommandHandler) botUnbanHandler(s *discordgo.Session, i *discordgo.Int
 		return
 	}
 
+	// Try to fetch name/server name for display
+	targetDisplay := targetID
+	if user, err := s.User(targetID); err == nil && user != nil {
+		targetDisplay = fmt.Sprintf("%s (%s)", user.Username, targetID)
+	} else if guild, err := s.Guild(targetID); err == nil && guild != nil {
+		targetDisplay = fmt.Sprintf("%s (%s)", guild.Name, targetID)
+	}
+
 	embed := successEmbed("Bot Ban Removed",
-		fmt.Sprintf("Removed bot-level ban for `%s`", targetID))
+		fmt.Sprintf("Removed bot-level ban for **%s**", targetDisplay))
 	respondEmbed(s, i, embed)
 }
 

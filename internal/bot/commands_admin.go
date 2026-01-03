@@ -512,13 +512,20 @@ func (ch *CommandHandler) unbanHandler(s *discordgo.Session, i *discordgo.Intera
 
 	userID := getStringOption(i, "user_id")
 
-	err := s.GuildBanDelete(i.GuildID, userID)
+	// Try to fetch user info from Discord
+	user, err := s.User(userID)
+	userDisplay := userID
+	if err == nil && user != nil {
+		userDisplay = fmt.Sprintf("%s (%s)", user.Username, userID)
+	}
+
+	err = s.GuildBanDelete(i.GuildID, userID)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to unban user: "+err.Error())
 		return
 	}
 
-	embed := successEmbed("User Unbanned", fmt.Sprintf("User <@%s> has been unbanned.", userID))
+	embed := successEmbed("User Unbanned", fmt.Sprintf("**%s** has been unbanned.", userDisplay))
 	respondEmbed(s, i, embed)
 }
 
@@ -858,14 +865,21 @@ func (ch *CommandHandler) hackbanHandler(s *discordgo.Session, i *discordgo.Inte
 		return
 	}
 
-	err := s.GuildBanCreateWithReason(i.GuildID, userID, reason, 0)
+	// Try to fetch user info from Discord
+	user, err := s.User(userID)
+	userDisplay := userID
+	if err == nil && user != nil {
+		userDisplay = fmt.Sprintf("%s (%s)", user.Username, userID)
+	}
+
+	err = s.GuildBanCreateWithReason(i.GuildID, userID, reason, 0)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to ban user: "+err.Error())
 		return
 	}
 
 	embed := successEmbed("User Banned",
-		fmt.Sprintf("User `%s` has been banned.\n**Reason:** %s", userID, reason))
+		fmt.Sprintf("**%s** has been banned.\n**Reason:** %s", userDisplay, reason))
 	respondEmbed(s, i, embed)
 }
 
