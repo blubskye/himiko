@@ -33,7 +33,7 @@ import (
 const (
 	GitHubRepo    = "blubskye/himiko"
 	GitHubAPIURL  = "https://api.github.com/repos/" + GitHubRepo + "/releases/latest"
-	CurrentVersion = "1.7.2"
+	CurrentVersion = "1.8.0"
 )
 
 // Release represents a GitHub release
@@ -391,4 +391,163 @@ func RelaunchAfterUpdate() error {
 	// On Unix systems, use syscall.Exec to replace the current process
 	// This preserves the PID and cleanly transitions to the new binary
 	return syscall.Exec(execPath, []string{execPath}, os.Environ())
+}
+
+// IsGitRepository checks if the current directory is a git repository
+func IsGitRepository() bool {
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	err := cmd.Run()
+	return err == nil
+}
+
+// CheckForSourceUpdate checks if there are new commits on the remote repository
+func CheckForSourceUpdate() (*UpdateInfo, error) {
+	if !IsGitRepository() {
+		return nil, fmt.Errorf("not in a git repository")
+	}
+
+	// Fetch latest changes from remote
+	fetchCmd := exec.Command("git", "fetch", "origin")
+	if err := fetchCmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to fetch from remote: %w", err)
+	}
+
+	// Get current branch
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchOut, err := branchCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current branch: %w", err)
+	}
+	branch := strings.TrimSpace(string(branchOut))
+
+	// Check if there are new commits
+	revListCmd := exec.Command("git", "rev-list", "HEAD..origin/"+branch, "--count")
+	revListOut, err := revListCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for updates: %w", err)
+	}
+
+	behindCount := strings.TrimSpace(string(revListOut))
+	available := behindCount != "0"
+
+	// Get remote version tag if available
+	tagCmd := exec.Command("git", "describe", "--tags", "--abbrev=0", "origin/"+branch)
+	tagOut, _ := tagCmd.Output()
+	newVersion := strings.TrimSpace(string(tagOut))
+	if newVersion == "" {
+		newVersion = "latest"
+	} else {
+		newVersion = strings.TrimPrefix(newVersion, "v")
+	}
+
+	// Get commit messages since last update
+	logCmd := exec.Command("git", "log", "HEAD..origin/"+branch, "--oneline", "--no-decorate")
+	logOut, _ := logCmd.Output()
+	releaseNotes := string(logOut)
+	if releaseNotes == "" {
+		releaseNotes = "No new commits"
+	}
+
+	info := &UpdateInfo{
+		Available:      available,
+		CurrentVersion: CurrentVersion,
+		NewVersion:     newVersion,
+		ReleaseNotes:   releaseNotes,
+	}
+
+	return info, nil
+}
+
+// ApplySourceUpdate pulls the latest code and rebuilds the binary
+func ApplySourceUpdate(progressFn func(step, total int, message string)) error {
+	if !IsGitRepository() {
+		return fmt.Errorf("not in a git repository")
+	}
+
+	totalSteps := 5
+	currentStep := 0
+
+	// Step 1: Stash any local changes
+	currentStep++
+	if progressFn != nil {
+		progressFn(currentStep, totalSteps, "Stashing local changes...")
+	}
+	stashCmd := exec.Command("git", "stash", "push", "-m", "Auto-update stash")
+	stashCmd.Run() // Ignore errors - may have nothing to stash
+
+	// Step 2: Pull latest changes
+	currentStep++
+	if progressFn != nil {
+		progressFn(currentStep, totalSteps, "Pulling latest changes...")
+	}
+	pullCmd := exec.Command("git", "pull", "origin")
+	pullCmd.Stdout = os.Stdout
+	pullCmd.Stderr = os.Stderr
+	if err := pullCmd.Run(); err != nil {
+		return fmt.Errorf("failed to pull updates: %w", err)
+	}
+
+	// Step 3: Get executable path
+	currentStep++
+	if progressFn != nil {
+		progressFn(currentStep, totalSteps, "Determining build path...")
+	}
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve executable path: %w", err)
+	}
+
+	// Step 4: Build new binary
+	currentStep++
+	if progressFn != nil {
+		progressFn(currentStep, totalSteps, "Building from source...")
+	}
+
+	tmpBinary := execPath + ".new"
+	buildCmd := exec.Command("go", "build", "-o", tmpBinary, "./cmd/himiko")
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("failed to build: %w", err)
+	}
+
+	// Step 5: Replace binary
+	currentStep++
+	if progressFn != nil {
+		progressFn(currentStep, totalSteps, "Installing new binary...")
+	}
+
+	// Backup old binary
+	backupPath := execPath + ".old"
+	if err := os.Rename(execPath, backupPath); err != nil {
+		os.Remove(tmpBinary)
+		return fmt.Errorf("failed to backup old binary: %w", err)
+	}
+
+	// Move new binary into place
+	if err := os.Rename(tmpBinary, execPath); err != nil {
+		// Try to restore backup
+		os.Rename(backupPath, execPath)
+		return fmt.Errorf("failed to install new binary: %w", err)
+	}
+
+	// Make executable (Unix)
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(execPath, 0755); err != nil {
+			fmt.Printf("Warning: Failed to set permissions: %v\n", err)
+		}
+	}
+
+	// Remove backup
+	os.Remove(backupPath)
+
+	if progressFn != nil {
+		progressFn(totalSteps, totalSteps, "Update complete!")
+	}
+
+	return nil
 }

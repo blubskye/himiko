@@ -191,6 +191,7 @@ A feature-rich Discord bot written in Go with SQLite storage, named after everyo
 - **Easy Apply:** Use `/update apply` to download and install updates
 - **Auto-Relaunch:** Bot automatically restarts with new version after update
 - **Config Preservation:** Updates keep your config.json intact (max 3 backups)
+- **Source-Based Updates:** Build from source instead of downloading binaries (perfect for BSD!)
 - **Configurable:** Enable/disable auto-update, auto-apply, check interval, and notification channel
 
 ### 🌐 Web Dashboard
@@ -271,6 +272,7 @@ Copy `config.example.json` to `config.json` and fill in your details:
     "auto_update_apply": false,
     "update_check_hours": 24,
     "update_notify_channel": "",
+    "update_from_source": false,
     "debug_mode": false
   },
   "webserver": {
@@ -488,6 +490,80 @@ If you prefer whole-database encryption, you can store your `himiko.db` on a Ver
 4. Unmount when not in use
 
 This provides full-disk encryption but requires manual mounting.
+
+---
+
+## 🔄 Source-Based Updates (BSD & Custom Builds)
+
+*"I'll build myself just for you~"* 💉
+
+For systems where pre-compiled binaries aren't available (like FreeBSD, OpenBSD, or custom architectures), Himiko supports building updates from source automatically.
+
+### Why Source-Based Updates?
+
+- **BSD Compatibility:** Pre-compiled Linux binaries won't work on BSD systems
+- **Custom Builds:** Build with your own compiler flags or optimizations
+- **No VM Required:** No need to run a VM just to cross-compile binaries
+- **Always Fresh:** Build directly from the latest git repository
+
+### Enabling Source-Based Updates
+
+1. **Clone the repository** (if you haven't already):
+   ```bash
+   git clone https://github.com/blubskye/himiko.git
+   cd himiko
+   ```
+
+2. **Enable in config.json**:
+   ```json
+   {
+     "features": {
+       "update_from_source": true
+     }
+   }
+   ```
+
+3. **Build and run**:
+   ```bash
+   go build ./cmd/himiko
+   ./himiko
+   ```
+
+### How It Works
+
+When `update_from_source` is enabled:
+
+1. **Check for updates:** `git fetch` to check for new commits
+2. **Apply updates:** `git pull` followed by `go build`
+3. **Replace binary:** Swaps out the old binary with the newly built one
+4. **Relaunch:** Automatically restarts the bot with the new version
+
+### Usage
+
+```bash
+# Check for source updates
+/update check
+
+# Pull and rebuild from source
+/update apply
+
+# View current version and update method
+/update version
+```
+
+### Requirements
+
+- Git must be installed
+- Go 1.21+ must be installed
+- Must be running from a cloned git repository
+- GCC required (for go-sqlite3 compilation)
+
+### Important Notes
+
+- Local changes are automatically stashed before updating
+- The update preserves your `config.json` and database
+- If the build fails, the old binary is restored automatically
+- Works great with FreeBSD, OpenBSD, NetBSD, and other Unix-like systems
 
 ---
 

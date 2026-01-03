@@ -25,6 +25,7 @@
     "auto_update_apply": false,
     "update_check_hours": 24,
     "update_notify_channel": "",
+    "update_from_source": false,
     "debug_mode": false
   },
   "webserver": {

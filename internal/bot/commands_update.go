@@ -65,10 +65,26 @@ func (ch *CommandHandler) updatePrefixHandler(ctx *PrefixContext) {
 }
 
 func (ch *CommandHandler) updateCheckPrefix(ctx *PrefixContext) {
-	info, err := updater.CheckForUpdateByPattern()
-	if err != nil {
-		ctx.Reply("Failed to check for updates: " + err.Error())
-		return
+	var info *updater.UpdateInfo
+	var err error
+
+	// Check if source-based updates are enabled
+	if ch.bot.Config.Features.UpdateFromSource {
+		if !updater.IsGitRepository() {
+			ctx.Reply("Source-based updates are enabled but not in a git repository. Clone the repo to use this feature.")
+			return
+		}
+		info, err = updater.CheckForSourceUpdate()
+		if err != nil {
+			ctx.Reply("Failed to check for updates: " + err.Error())
+			return
+		}
+	} else {
+		info, err = updater.CheckForUpdateByPattern()
+		if err != nil {
+			ctx.Reply("Failed to check for updates: " + err.Error())
+			return
+		}
 	}
 
 	if !info.Available {
@@ -81,16 +97,24 @@ func (ch *CommandHandler) updateCheckPrefix(ctx *PrefixContext) {
 		return
 	}
 
+	updateMethod := "Binary Download"
+	if ch.bot.Config.Features.UpdateFromSource {
+		updateMethod = "Build from Source"
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title:       "Update Available!",
-		Description: fmt.Sprintf("A new version is available: **v%s** (current: v%s)", info.NewVersion, info.CurrentVersion),
+		Description: fmt.Sprintf("A new version is available: **v%s** (current: v%s)\n**Method:** %s", info.NewVersion, info.CurrentVersion, updateMethod),
 		Color:       0x5865F2,
-		Fields: []*discordgo.MessageEmbedField{
+	}
+
+	if !ch.bot.Config.Features.UpdateFromSource && info.Size > 0 {
+		embed.Fields = []*discordgo.MessageEmbedField{
 			{
 				Name:  "Download Size",
 				Value: formatBytes(info.Size),
 			},
-		},
+		}
 	}
 
 	if info.ReleaseNotes != "" {
@@ -98,14 +122,17 @@ func (ch *CommandHandler) updateCheckPrefix(ctx *PrefixContext) {
 		if len(notes) > 1000 {
 			notes = notes[:1000] + "..."
 		}
+		if embed.Fields == nil {
+			embed.Fields = []*discordgo.MessageEmbedField{}
+		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:  "Release Notes",
-			Value: notes,
+			Name:  "Changes",
+			Value: "```\n" + notes + "\n```",
 		})
 	}
 
 	embed.Footer = &discordgo.MessageEmbedFooter{
-		Text: "Use " + ctx.Prefix + "update apply to download and install",
+		Text: "Use " + ctx.Prefix + "update apply to install",
 	}
 
 	ctx.ReplyEmbed(embed)
@@ -114,6 +141,60 @@ func (ch *CommandHandler) updateCheckPrefix(ctx *PrefixContext) {
 func (ch *CommandHandler) updateApplyPrefix(ctx *PrefixContext) {
 	ctx.Reply("Checking for updates...")
 
+	// Check if source-based updates are enabled
+	if ch.bot.Config.Features.UpdateFromSource {
+		if !updater.IsGitRepository() {
+			ctx.Reply("Source-based updates are enabled but not in a git repository. Clone the repo to use this feature.")
+			return
+		}
+
+		info, err := updater.CheckForSourceUpdate()
+		if err != nil {
+			ctx.Reply("Failed to check for updates: " + err.Error())
+			return
+		}
+
+		if !info.Available {
+			ctx.Reply("No updates available. You are running the latest version.")
+			return
+		}
+
+		ctx.Reply("Pulling latest code and building from source...")
+
+		// Apply source-based update with progress updates
+		err = updater.ApplySourceUpdate(func(step, total int, message string) {
+			ctx.Reply(fmt.Sprintf("[%d/%d] %s", step, total, message))
+		})
+
+		if err != nil {
+			ctx.Reply("Failed to apply update: " + err.Error())
+			return
+		}
+
+		embed := &discordgo.MessageEmbed{
+			Title:       "Update Applied Successfully!",
+			Description: fmt.Sprintf("Built and installed version v%s from source\n\n**Relaunching bot with new version...**", info.NewVersion),
+			Color:       0x57F287,
+			Footer: &discordgo.MessageEmbedFooter{
+				Text: "Bot is relaunching automatically",
+			},
+		}
+
+		ctx.ReplyEmbed(embed)
+
+		// Give Discord a moment to receive the response
+		time.Sleep(2 * time.Second)
+
+		// Relaunch the bot with the new executable
+		if err := updater.RelaunchAfterUpdate(); err != nil {
+			fmt.Printf("[Update] Failed to relaunch: %v\n", err)
+			ctx.Reply(fmt.Sprintf("Failed to auto-relaunch: %v\nPlease restart the bot manually.", err))
+		}
+
+		return
+	}
+
+	// Binary-based update
 	info, err := updater.CheckForUpdateByPattern()
 	if err != nil {
 		ctx.Reply("Failed to check for updates: " + err.Error())
@@ -162,6 +243,14 @@ func (ch *CommandHandler) updateApplyPrefix(ctx *PrefixContext) {
 }
 
 func (ch *CommandHandler) updateVersionPrefix(ctx *PrefixContext) {
+	updateMethod := "Binary Download"
+	if ch.bot.Config.Features.UpdateFromSource {
+		updateMethod = "Build from Source"
+		if !updater.IsGitRepository() {
+			updateMethod += " (Not in git repo!)"
+		}
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title: "Himiko Version Info",
 		Color: 0xFF69B4,
@@ -180,6 +269,11 @@ func (ch *CommandHandler) updateVersionPrefix(ctx *PrefixContext) {
 				Name:   "Auto-Apply Updates",
 				Value:  boolToEnabled(ch.bot.Config.Features.AutoUpdateApply),
 				Inline: true,
+			},
+			{
+				Name:   "Update Method",
+				Value:  updateMethod,
+				Inline: false,
 			},
 		},
 	}

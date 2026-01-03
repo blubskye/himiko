@@ -59,6 +59,7 @@ type Config struct {
 		AutoUpdateApply     bool   `json:"auto_update_apply"`     // Automatically apply updates (requires restart)
 		UpdateCheckHours    int    `json:"update_check_hours"`    // Hours between periodic update checks (0 = disabled)
 		UpdateNotifyChannel string `json:"update_notify_channel"` // Channel ID to post update notifications
+		UpdateFromSource    bool   `json:"update_from_source"`    // Build from source instead of downloading binaries (useful for BSD)
 		DebugMode           bool   `json:"debug_mode"`            // Enable verbose logging and stack traces
 	} `json:"features"`
 
